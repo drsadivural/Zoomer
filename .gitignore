@@ -1,0 +1,27 @@
+# dependencies
+node_modules/
+
+# build output
+dist/
+.wrangler/
+
+# local secrets — never commit
+# seed.sql is generated and carries the bootstrap password hash for a live
+# deployment; generate it per environment with scripts/make-seed.mjs instead.
+seed/seed.sql
+.dev.vars
+.dev.vars.*
+.secrets/
+.env
+.env.local
+
+# working artifacts
+_src_mockup/
+.playwright-mcp/
+*.log
+coverage/
+*.png
+!public/**/*.png
+
+# os
+.DS_Store

@@ -1,0 +1,60 @@
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "ayonix-zoomer",
+  "main": "worker/index.ts",
+  "compatibility_date": "2026-09-15",
+  "compatibility_flags": ["nodejs_compat"],
+  "observability": { "enabled": true },
+
+  // Custom domain on the customer's own zone. A dedicated subdomain, so it does
+  // not touch any existing hostname. The Zoom OAuth redirect and webhook URL
+  // must match this origin exactly.
+  "routes": [{ "pattern": "zoomer.ayonix.com", "custom_domain": true }],
+  // Keep the *.workers.dev origin alive alongside the custom domain, so there is
+  // always a reachable URL even while DNS or a certificate is still settling.
+  "workers_dev": true,
+
+  // SPA: unknown paths fall through to index.html so client routing works.
+  "assets": {
+    "directory": "dist/client",
+    "binding": "ASSETS",
+    "not_found_handling": "single-page-application"
+  },
+
+  // Storage is pinned to APAC for Japanese data-residency review
+  // (SECURITY_PRIVACY.md §5).
+  "d1_databases": [
+    {
+      "binding": "DB",
+      "database_name": "ayonix-zoomer",
+      "database_id": "77b41385-f9db-4523-95a6-d7c186db3cee",
+      "migrations_dir": "migrations"
+    }
+  ],
+  "r2_buckets": [
+    { "binding": "EVIDENCE", "bucket_name": "ayonix-zoomer-evidence" },
+    { "binding": "REPORTS", "bucket_name": "ayonix-zoomer-reports" }
+  ],
+
+  // One Durable Object per training session: fans realtime state out to admin
+  // dashboards and absorbs event bursts (ARCHITECTURE.md §2.3).
+  "durable_objects": {
+    "bindings": [{ "name": "SESSION_HUB", "class_name": "SessionHub" }]
+  },
+  "migrations": [{ "tag": "v1", "new_sqlite_classes": ["SessionHub"] }],
+
+  // Evidence past its retention deadline is purged hourly.
+  "triggers": { "crons": ["0 * * * *"] },
+
+  "vars": {
+    "APP_NAME": "Ayonix Zoomer",
+    "PUBLIC_BASE_URL": "https://zoomer.ayonix.com",
+    "ZOOM_OAUTH_REDIRECT_PATH": "/api/v1/integrations/zoom/oauth/callback",
+    "EVIDENCE_URL_TTL_SECONDS": "60",
+    "LOG_LEVEL": "info"
+  }
+
+  // Secrets (set via `wrangler secret put`, never committed):
+  //   ZOOM_CLIENT_ID, ZOOM_CLIENT_SECRET, ZOOM_WEBHOOK_SECRET_TOKEN,
+  //   DATA_ENCRYPTION_KEY, SESSION_SIGNING_KEY
+}
