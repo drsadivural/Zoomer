@@ -17,17 +17,21 @@
  */
 import { useCallback, useEffect, useRef, useState } from "react";
 import {
-  Camera, CameraOff, Copy, Loader2, ScanFace, ShieldCheck, UserCheck, UserX,
+  Camera, CameraOff, Copy, Loader2, ScanFace, ShieldCheck, UserCheck, UserPlus, UserX,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from "@/components/ui/dialog";
 import { StatusBadge } from "@/components/shell/primitives";
 import {
   analyseFrame, descriptorToArray, EAR_CLOSED_THRESHOLD, EMPTY_QUALITY, ENGINE_ID, largestFace,
-  loadModels, type FaceObservation, type FrameAnalysis,
+  loadModels, MODEL_VERSION, type FaceObservation, type FrameAnalysis,
 } from "@/lib/face/engine";
 import { LivenessDetector, type LivenessResult } from "@/lib/face/liveness";
 import { api, ApiClientError, type IdentifyResponse } from "@/lib/api";
+import { useCan } from "@/lib/auth-context";
+
+const CONSENT_POLICY_VERSION = "2026-09-01";
+const CONSENT_SCOPE = ["face_template", "monitoring", "evidence_images"];
 
 type CamState = "idle" | "loading" | "requesting" | "ready" | "denied" | "error";
 type Tone = "success" | "warning" | "danger" | "neutral";
@@ -75,6 +79,15 @@ export function LocalCameraMonitor({ open, onOpenChange }: { open: boolean; onOp
   const [thresholds, setThresholds] = useState<Thresholds>(DEFAULTS);
   const [identity, setIdentity] = useState<IdentifyResponse | null>(null);
   const [log, setLog] = useState<LogEntry[]>([]);
+
+  const can = useCan();
+  const canRegister = can("enrollment:write");
+  const [regOpen, setRegOpen] = useState(false);
+  const [regForm, setRegForm] = useState({ name: "", externalId: "", department: "" });
+  const [regConsent, setRegConsent] = useState(false);
+  const [regBusy, setRegBusy] = useState(false);
+  const [regError, setRegError] = useState<string | null>(null);
+  const [regReasons, setRegReasons] = useState<string[]>([]);
 
   const addLog = useCallback((tone: Tone, text: string) => {
     setLog((prev) => [{ id: ++logSeq.current, at: Date.now(), tone, text }, ...prev].slice(0, 80));
@@ -297,6 +310,49 @@ export function LocalCameraMonitor({ open, onOpenChange }: { open: boolean; onOp
   const idHasFacePresent = (analysis?.faceCount ?? 0) === 1;
   const identityTone: Tone = idMatched ? "success" : identity && idHasFacePresent && identity.enrolledTrainees > 0 ? "danger" : "neutral";
 
+  async function registerFace() {
+    if (!videoRef.current) return;
+    const name = regForm.name.trim();
+    const externalId = regForm.externalId.trim();
+    if (!name || !externalId) { setRegError("氏名と受講者IDを入力してください"); return; }
+    if (!regConsent) { setRegError("本人の同意取得を確認してください"); return; }
+    setRegBusy(true); setRegError(null); setRegReasons([]);
+    try {
+      const result = await analyseFrame(videoRef.current, { withDescriptor: true });
+      const face = largestFace(result);
+      if (result.faceCount !== 1 || !face?.descriptor) {
+        setRegError(result.faceCount > 1 ? "複数の顔が検出されています。1人で登録してください" : "顔を検出できませんでした");
+        return;
+      }
+      const created = await api.createTrainee({
+        externalId, name, department: regForm.department.trim() || undefined,
+      });
+      await api.enroll(created.trainee.id, {
+        descriptor: descriptorToArray(face.descriptor),
+        engine: ENGINE_ID,
+        modelVersion: MODEL_VERSION,
+        quality: result.quality,
+        consent: { policyVersion: CONSENT_POLICY_VERSION, scope: CONSENT_SCOPE },
+      });
+      addLog("success", `顔登録が完了しました: ${name}（${externalId}）`);
+      setRegOpen(false);
+      setRegForm({ name: "", externalId: "", department: "" });
+      setRegConsent(false);
+      // Re-run identification so the newly enrolled face is recognised at once.
+      identityKeyRef.current = ""; lastIdentifyAt.current = 0; setIdentity(null);
+    } catch (e) {
+      if (e instanceof ApiClientError) {
+        setRegError(e.message);
+        const payload = e.payload as { error?: { reasons?: string[] } } | undefined;
+        setRegReasons(payload?.error?.reasons ?? []);
+      } else {
+        setRegError("登録に失敗しました");
+      }
+    } finally {
+      setRegBusy(false);
+    }
+  }
+
   function copyLog() {
     const text = log.slice().reverse().map((e) => `${new Date(e.at).toLocaleTimeString("ja-JP")}  ${e.text}`).join("\n");
     void navigator.clipboard.writeText(text).catch(() => undefined);
@@ -458,14 +514,66 @@ export function LocalCameraMonitor({ open, onOpenChange }: { open: boolean; onOp
           </div>
         </div>
 
+        {regOpen && (
+          <div className="space-y-2 rounded-xl border border-cyan-200 bg-cyan-50/60 p-3">
+            <div className="flex items-center gap-2 text-sm font-bold text-cyan-900">
+              <UserPlus className="size-4" /> カメラ映像から顔を登録
+            </div>
+            <p className="text-xs text-cyan-800">
+              いま映っている顔を新しい受講者として登録します。1人だけ映してください。特徴量は暗号化して保存し、原画像は保存しません。
+            </p>
+            <div className="grid gap-2 sm:grid-cols-3">
+              <div>
+                <label className="field-label" htmlFor="reg-name">氏名</label>
+                <input id="reg-name" className="h-9 w-full rounded-lg border border-slate-200 px-2 text-sm"
+                  value={regForm.name} onChange={(e) => setRegForm({ ...regForm, name: e.target.value })} placeholder="佐藤 美咲" />
+              </div>
+              <div>
+                <label className="field-label" htmlFor="reg-id">受講者ID</label>
+                <input id="reg-id" className="h-9 w-full rounded-lg border border-slate-200 px-2 text-sm"
+                  value={regForm.externalId} onChange={(e) => setRegForm({ ...regForm, externalId: e.target.value })} placeholder="AZ-0241" />
+              </div>
+              <div>
+                <label className="field-label" htmlFor="reg-dept">所属（任意）</label>
+                <input id="reg-dept" className="h-9 w-full rounded-lg border border-slate-200 px-2 text-sm"
+                  value={regForm.department} onChange={(e) => setRegForm({ ...regForm, department: e.target.value })} placeholder="人事部" />
+              </div>
+            </div>
+            <label className="flex items-start gap-2 text-xs text-cyan-900">
+              <input type="checkbox" className="mt-0.5" checked={regConsent} onChange={(e) => setRegConsent(e.target.checked)} />
+              <span>本人から、カメラ利用・顔情報の処理・証跡画像の保存について同意を取得しました。（同意文面バージョン {CONSENT_POLICY_VERSION}）</span>
+            </label>
+            {regError && (
+              <div role="alert" className="rounded-lg border border-rose-200 bg-rose-50 px-2.5 py-2 text-xs text-rose-700">
+                <div className="font-semibold">{regError}</div>
+                {regReasons.length > 0 && (
+                  <ul className="mt-1 list-inside list-disc">{regReasons.map((r) => <li key={r}>{r}</li>)}</ul>
+                )}
+              </div>
+            )}
+            <div className="flex justify-end gap-2">
+              <Button variant="outline" size="sm" onClick={() => setRegOpen(false)}>キャンセル</Button>
+              <Button size="sm" className="gap-1.5" disabled={regBusy || !ready} onClick={() => void registerFace()}>
+                {regBusy ? <Loader2 className="size-4 animate-spin" /> : <UserPlus className="size-4" />}
+                {regBusy ? "登録中…" : "登録する"}
+              </Button>
+            </div>
+          </div>
+        )}
+
         <div className="flex flex-wrap items-center justify-between gap-2 border-t border-slate-100 pt-3">
           <p className="inline-flex items-center gap-1.5 text-xs text-slate-500">
             <ShieldCheck className="size-3.5 text-emerald-500" />
             端末内で解析。映像は送信されず、照合用の特徴量のみをサーバーへ送ります。
           </p>
           <div className="flex items-center gap-2">
+            {ready && canRegister && (
+              <Button className="gap-1.5" onClick={() => { setRegError(null); setRegReasons([]); setRegOpen((v) => !v); }}>
+                <UserPlus className="size-4" /> この顔を登録
+              </Button>
+            )}
             {ready ? (
-              <Button variant="outline" className="gap-1.5" onClick={() => { stop(); setCamState("idle"); addLog("neutral", "解析を停止しました"); }}>
+              <Button variant="outline" className="gap-1.5" onClick={() => { stop(); setCamState("idle"); setRegOpen(false); addLog("neutral", "解析を停止しました"); }}>
                 <CameraOff className="size-4" /> 停止
               </Button>
             ) : (
