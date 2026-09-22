@@ -14,7 +14,7 @@ import { z } from "zod";
 import { faceEnrollments, trainees } from "../db/schema";
 import { getActor, requireAuth, requirePermission } from "../lib/auth";
 import { serverError } from "../lib/errors";
-import { assertDescriptor, cosineSimilarity, unsealDescriptor } from "../lib/faces";
+import { assertDescriptor, matchScore, unsealDescriptor } from "../lib/faces";
 import { parseBody } from "../lib/http";
 import { getRules } from "../lib/settings";
 import type { Env, Variables } from "../types";
@@ -68,7 +68,7 @@ app.post("/identify", requireAuth, requirePermission("session:read"), async (c) 
       continue; // A single unreadable template must not fail the whole lookup.
     }
     if (stored.length !== live.length) continue;
-    const score = cosineSimilarity(live, stored);
+    const score = matchScore(live, stored);
     const prev = best.get(r.traineeId);
     if (!prev || score > prev.score) {
       best.set(r.traineeId, { traineeId: r.traineeId, name: r.name, externalId: r.externalId, score });

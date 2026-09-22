@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { assertDescriptor, assessQuality, cosineSimilarity, type QualityInput } from "../worker/lib/faces";
+import { assertDescriptor, assessQuality, cosineSimilarity, euclideanDistance, matchScore, type QualityInput } from "../worker/lib/faces";
 
 const GOOD: QualityInput = {
   faceCount: 1, relativeSize: 0.18, yaw: 0.05, pitch: 0.03,
@@ -26,6 +26,50 @@ describe("cosineSimilarity", () => {
 
   it("rejects mismatched dimensions", () => {
     expect(() => cosineSimilarity([1, 2], [1, 2, 3])).toThrow();
+  });
+});
+
+describe("euclideanDistance", () => {
+  it("is 0 for identical vectors", () => {
+    expect(euclideanDistance([1, 2, 3], [1, 2, 3])).toBe(0);
+  });
+  it("computes L2 distance", () => {
+    expect(euclideanDistance([0, 0], [3, 4])).toBeCloseTo(5, 10);
+  });
+  it("rejects mismatched dimensions", () => {
+    expect(() => euclideanDistance([1, 2], [1, 2, 3])).toThrow();
+  });
+});
+
+describe("matchScore (Euclidean-calibrated)", () => {
+  const at = (d: number) => {
+    // build a pair exactly distance d apart
+    const a = new Array(128).fill(0);
+    const b = new Array(128).fill(0);
+    b[0] = d;
+    return matchScore(a, b);
+  };
+
+  it("maps the standard 0.6 operating distance to the 0.82 threshold", () => {
+    expect(at(0.6)).toBeCloseTo(0.82, 6);
+  });
+
+  it("accepts same-person distances (~0.4) above the 0.82 threshold", () => {
+    expect(at(0.4)).toBeGreaterThan(0.82); // ≈0.88 → matches
+  });
+
+  it("rejects different-person distances (~0.85) below the 0.82 threshold", () => {
+    expect(at(0.85)).toBeLessThan(0.82); // ≈0.745 → correctly not a match
+  });
+
+  it("is 1 for an identical descriptor and clamps at 0 for far ones", () => {
+    expect(at(0)).toBe(1);
+    expect(at(10)).toBe(0);
+  });
+
+  it("decreases monotonically with distance", () => {
+    expect(at(0.3)).toBeGreaterThan(at(0.5));
+    expect(at(0.5)).toBeGreaterThan(at(0.9));
   });
 });
 

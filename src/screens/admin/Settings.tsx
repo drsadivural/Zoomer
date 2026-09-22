@@ -179,7 +179,7 @@ export function SettingsScreen() {
         />
         <div className="grid gap-4 border-t border-slate-100 p-5 sm:grid-cols-2 xl:grid-cols-3">
           {num("reauthIntervalSec", "継続認証の間隔（秒）", "この間隔で顔を再照合します", 15, 900)}
-          {num("matchThreshold", "顔一致しきい値", "コサイン類似度。実データでのFAR/FRR測定に基づき調整してください", 0.5, 0.999, 0.01)}
+          {num("matchThreshold", "顔一致しきい値", "0〜1の一致スコア（ユークリッド距離に基づく較正値。高いほど厳格、既定0.82）。実データでのFAR/FRR測定に基づき調整してください", 0.5, 0.999, 0.01)}
           {num("absenceSec", "離席判定秒数", "顔が検出できない状態がこの秒数続いたら離席とします", 10, 600)}
           {num("eyesClosedSec", "閉眼秒数", "この秒数を超えたら居眠り疑いとして管理者確認へ回します", 3, 120)}
           {num("multiFaceFrames", "複数人の連続フレーム数", "誤検知を避けるため、単発フレームでは判定しません", 3, 300)}

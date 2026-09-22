@@ -28,7 +28,7 @@ import { getDevice, requireDevice } from "../lib/auth";
 import { generateToken } from "../lib/crypto";
 import { badRequest, forbidden, notFound, serverError, unprocessable } from "../lib/errors";
 import { decodeDataUrl, putEncrypted } from "../lib/evidence";
-import { assertDescriptor, assessQuality, cosineSimilarity, unsealDescriptor } from "../lib/faces";
+import { assertDescriptor, assessQuality, matchScore as computeMatchScore, unsealDescriptor } from "../lib/faces";
 import { parseBody } from "../lib/http";
 import { newId } from "../lib/ids";
 import { verifyJoinToken } from "../lib/join";
@@ -288,7 +288,7 @@ app.post("/session/:participantId/precheck", async (c) => {
 
   const live = assertDescriptor(body.descriptor, body.engine);
   const stored = await unsealDescriptor(enrollment.template, enrollment.templateIv, key);
-  const matchScore = cosineSimilarity(live, stored);
+  const matchScore = computeMatchScore(live, stored);
   const passed = matchScore >= rules.matchThreshold;
 
   const attempts = participant.precheckAttempts + 1;
@@ -460,7 +460,7 @@ app.post("/reauth", requireDevice, async (c) => {
 
   const live = assertDescriptor(body.descriptor, body.engine);
   const stored = await unsealDescriptor(enrollment.template, enrollment.templateIv, key);
-  const matchScore = cosineSimilarity(live, stored);
+  const matchScore = computeMatchScore(live, stored);
   const passed = matchScore >= threshold;
 
   const type = passed ? "MATCH_OK" : "MATCH_FAIL";

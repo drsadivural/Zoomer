@@ -29,15 +29,11 @@ export function assertDescriptor(descriptor: unknown, engine: string): number[] 
 }
 
 /**
- * Cosine similarity in [-1, 1]; for face descriptors in practice [0, 1].
- *
- * Descriptors are L2-normalised, so this is equivalent to the Euclidean
- * distance used by the underlying model via cos = 1 - d²/2. We expose cosine
- * because it maps directly onto the "一致度 98.4%" figures the UI shows.
- *
- * TEST_PLAN.md §2 is explicit that production thresholds must come from a
- * FAR/FRR measurement on customer data — the shipped default is a starting
- * point for evaluation, not a certified operating point.
+ * Cosine similarity in [-1, 1]. Kept for reference/tests, but NOT used for face
+ * matching: face-api's 128-D descriptors are not unit-normalised (‖d‖≈1.4) and
+ * are not zero-centred, so different people sit at cosine ≈0.80-0.83 while the
+ * same person is ≈0.96 — the populations overlap and no cosine cutoff separates
+ * them reliably. Use `matchScore` (Euclidean-based) instead.
  */
 export function cosineSimilarity(a: number[], b: number[]): number {
   if (a.length !== b.length) throw unprocessable("顔特徴量の次元数が一致しません");
@@ -51,6 +47,35 @@ export function cosineSimilarity(a: number[], b: number[]): number {
   }
   if (na === 0 || nb === 0) return 0;
   return dot / (Math.sqrt(na) * Math.sqrt(nb));
+}
+
+/** Euclidean (L2) distance — the metric face-api's recognition net is trained for. */
+export function euclideanDistance(a: number[], b: number[]): number {
+  if (a.length !== b.length) throw unprocessable("顔特徴量の次元数が一致しません");
+  let sum = 0;
+  for (let i = 0; i < a.length; i++) sum += (a[i] - b[i]) ** 2;
+  return Math.sqrt(sum);
+}
+
+/**
+ * Match confidence in [0, 1], derived from Euclidean distance.
+ *
+ * Measured on face-api descriptors: same person d≈0.35-0.45, different person
+ * d≈0.8-0.9, so the model's standard operating point is a distance of ~0.6.
+ * We map distance→score linearly (`1 − 0.3·d`) so that the well-separated
+ * populations land either side of the shipped 0.82 threshold (0.6 ↔ 0.82):
+ * same person ≈0.87-0.90, different ≈0.73-0.76. This keeps `matchThreshold`
+ * as a "higher = stricter" similarity while comparing on the metric that
+ * actually separates faces.
+ *
+ * TEST_PLAN.md §2: production thresholds must still come from a FAR/FRR
+ * measurement on customer data; this is a corrected starting point.
+ */
+export const MATCH_DISTANCE_SLOPE = 0.3;
+
+export function matchScore(a: number[], b: number[]): number {
+  const d = euclideanDistance(a, b);
+  return Math.max(0, Math.min(1, 1 - MATCH_DISTANCE_SLOPE * d));
 }
 
 export async function sealDescriptor(descriptor: number[], key: string) {

@@ -356,7 +356,8 @@ export function descriptorToArray(descriptor: Float32Array): number[] {
   return Array.from(descriptor);
 }
 
-/** Mirrors the server's comparison so the UI can show a live match figure. */
+/** Cosine similarity. Retained for reference only — not a reliable face metric
+ *  here (see worker/lib/faces.ts). Prefer `matchScore`. */
 export function cosineSimilarity(a: number[] | Float32Array, b: number[] | Float32Array): number {
   let dot = 0;
   let na = 0;
@@ -368,4 +369,17 @@ export function cosineSimilarity(a: number[] | Float32Array, b: number[] | Float
   }
   if (na === 0 || nb === 0) return 0;
   return dot / (Math.sqrt(na) * Math.sqrt(nb));
+}
+
+/** Euclidean (L2) distance — the metric face-api's recognition net is trained for. */
+export function euclideanDistance(a: number[] | Float32Array, b: number[] | Float32Array): number {
+  let sum = 0;
+  for (let i = 0; i < a.length; i++) sum += (a[i] - b[i]) ** 2;
+  return Math.sqrt(sum);
+}
+
+/** Match confidence in [0,1] from Euclidean distance; mirrors the server
+ *  (distance 0.6 ↔ score 0.82). See worker/lib/faces.ts for the rationale. */
+export function matchScore(a: number[] | Float32Array, b: number[] | Float32Array): number {
+  return Math.max(0, Math.min(1, 1 - 0.3 * euclideanDistance(a, b)));
 }
