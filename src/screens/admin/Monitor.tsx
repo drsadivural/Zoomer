@@ -8,6 +8,7 @@ import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, D
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { api, ApiClientError, type Alert, type MonitorResponse, type Participant, type SessionSummary } from "@/lib/api";
 import { AppCard, CardHead, EmptyState, ErrorNotice, LoadingRows, MetricTile, StatusBadge } from "@/components/shell/primitives";
+import { LocalCameraMonitor } from "@/components/LocalCameraMonitor";
 import { formatClock, formatTime, MATCH_METHOD_LABELS, percent, STATUS_LABELS, STATUS_TONES } from "@/lib/format";
 import { useCan } from "@/lib/auth-context";
 
@@ -386,6 +387,8 @@ export function MonitorScreen() {
           </AppCard>
         </>
       )}
+
+      <LocalCameraMonitor />
 
       <Dialog open={Boolean(reviewTarget)} onOpenChange={(v) => !v && setReviewTarget(null)}>
         <DialogContent>
