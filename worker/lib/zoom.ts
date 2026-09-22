@@ -18,6 +18,7 @@ const ZOOM_API_BASE = "https://api.zoom.us/v2";
 /** Minimum scopes for roster sync; must match the Zoom app's scope list. */
 export const ZOOM_SCOPES = [
   "meeting:read:meeting",
+  "meeting:write:meeting",
   "meeting:read:list_meetings",
   "meeting:read:participant",
   "user:read:user",
@@ -234,6 +235,39 @@ export async function listMeetings(
     `/users/${encodeURIComponent(userId)}/meetings?type=${type}&page_size=100`,
   );
   return data.meetings ?? [];
+}
+
+export interface CreatedZoomMeeting {
+  id: number | string;
+  join_url: string;
+  start_url?: string;
+  password?: string;
+  topic?: string;
+  start_time?: string;
+  duration?: number;
+}
+
+/**
+ * Creates a Zoom meeting for the connected user. `type` 2 = scheduled (when a
+ * start time is given), 1 = instant. Requires the `meeting:write:meeting` scope,
+ * so the tenant must have re-authorised after that scope was added.
+ */
+export async function createMeeting(
+  accessToken: string,
+  input: { topic: string; startTime?: string; durationMin?: number; timezone?: string },
+  userId = "me",
+): Promise<CreatedZoomMeeting> {
+  return zoomApi<CreatedZoomMeeting>(accessToken, `/users/${encodeURIComponent(userId)}/meetings`, {
+    method: "POST",
+    body: JSON.stringify({
+      topic: input.topic,
+      type: input.startTime ? 2 : 1,
+      start_time: input.startTime,
+      duration: input.durationMin ?? 60,
+      timezone: input.timezone ?? "Asia/Tokyo",
+      settings: { join_before_host: true, waiting_room: false, approval_type: 2 },
+    }),
+  });
 }
 
 export interface ZoomParticipantRecord {

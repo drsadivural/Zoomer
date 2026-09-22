@@ -148,6 +148,33 @@ function CreateSessionDialog({
   const [zoomError, setZoomError] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+  const [creatingMeeting, setCreatingMeeting] = useState(false);
+  const [inviteUrl, setInviteUrl] = useState<string | null>(null);
+
+  async function createZoomMeeting() {
+    setCreatingMeeting(true);
+    setZoomError(null);
+    setInviteUrl(null);
+    try {
+      const startMs = new Date(startsAt).getTime();
+      const endMs = new Date(endsAt).getTime();
+      const durationMin =
+        startMs && endMs && endMs > startMs
+          ? Math.min(1440, Math.max(5, Math.round((endMs - startMs) / 60000)))
+          : 60;
+      const r = await api.zoomCreateMeeting({
+        topic: title.trim() || "研修",
+        startTime: startMs ? new Date(startMs).toISOString() : undefined,
+        durationMin,
+      });
+      setZoomMeetingId(r.meetingId);
+      setInviteUrl(r.joinUrl);
+    } catch (e) {
+      setZoomError(e instanceof ApiClientError ? e.message : "Zoomミーティングを作成できません");
+    } finally {
+      setCreatingMeeting(false);
+    }
+  }
 
   useEffect(() => {
     if (!open) return;
@@ -213,7 +240,23 @@ function CreateSessionDialog({
             </div>
           </div>
           <div className="space-y-1.5">
-            <label className="field-label" htmlFor="s-zoom">Zoomミーティング</label>
+            <div className="flex items-center justify-between">
+              <label className="field-label" htmlFor="s-zoom">Zoomミーティング</label>
+              <Button type="button" variant="outline" size="sm" className="gap-1.5" disabled={creatingMeeting} onClick={() => void createZoomMeeting()}>
+                <Video className="size-3.5" />
+                {creatingMeeting ? "作成中…" : "Zoomミーティングを作成"}
+              </Button>
+            </div>
+            {inviteUrl && (
+              <div className="rounded-xl border border-cyan-200 bg-cyan-50/60 p-2.5 text-xs">
+                <div className="font-bold text-cyan-900">Zoom招待リンクを作成しました（ID {zoomMeetingId}）</div>
+                <div className="mt-1 flex items-center gap-2">
+                  <code className="flex-1 truncate rounded bg-white px-2 py-1 text-slate-600">{inviteUrl}</code>
+                  <Button type="button" variant="ghost" size="sm" onClick={() => void navigator.clipboard.writeText(inviteUrl).catch(() => undefined)}>コピー</Button>
+                </div>
+                <p className="mt-1 text-cyan-800">参加者は Zoom で参加し、発行される受講リンクを開くと本人確認・監視が始まります。</p>
+              </div>
+            )}
             {zoomError ? (
               <>
                 <Input id="s-zoom" value={zoomMeetingId} onChange={(e) => setZoomMeetingId(e.target.value)} placeholder="ミーティングID（数字）" />

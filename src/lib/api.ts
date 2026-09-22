@@ -164,6 +164,8 @@ export const api = {
   zoomAuthorize: () =>
     request<{ url: string; redirectUri: string; scopes: string[] }>("/integrations/zoom/authorize"),
   zoomDisconnect: () => request<{ ok: boolean }>("/integrations/zoom", { method: "DELETE" }),
+  zoomCreateMeeting: (body: { topic: string; startTime?: string; durationMin?: number }) =>
+    request<ZoomCreatedMeeting>("/integrations/zoom/meetings", { method: "POST", body }),
   zoomMeetings: (type = "upcoming") =>
     request<{ meetings: ZoomMeeting[] }>("/integrations/zoom/meetings", { query: { type } }),
   zoomSyncParticipants: (sessionId: string) =>
@@ -472,6 +474,15 @@ export interface ZoomStatus {
   webhookUrl: string;
   configured: boolean;
   webhookConfigured: boolean;
+}
+
+export interface ZoomCreatedMeeting {
+  meetingId: string;
+  joinUrl: string;
+  startUrl: string | null;
+  password: string | null;
+  topic?: string;
+  startTime?: string | null;
 }
 
 export interface ZoomMeeting {

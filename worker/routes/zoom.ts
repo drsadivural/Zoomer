@@ -17,6 +17,7 @@ import { newId } from "../lib/ids";
 import { publishToSession } from "../lib/realtime";
 import {
   buildAuthorizeUrl,
+  createMeeting,
   exchangeCode,
   getAccessToken,
   listMeetings,
@@ -211,6 +212,78 @@ app.get("/meetings", requireAuth, requirePermission("session:read"), async (c) =
   }
 
   return c.json({ meetings });
+});
+
+/* ---------------------------------------------------- create meeting */
+
+const createMeetingSchema = z.object({
+  topic: z.string().min(1).max(200),
+  startTime: z.string().optional(), // ISO 8601; omit for an instant meeting
+  durationMin: z.number().int().min(5).max(1440).optional(),
+});
+
+/**
+ * Creates a Zoom meeting for the connected account and returns its invitation.
+ * Needs the `meeting:write:meeting` scope — if the tenant authorised before that
+ * scope was added, Zoom returns 4711 and they must reconnect.
+ */
+app.post("/meetings", requireAuth, requirePermission("session:write"), async (c) => {
+  const actor = getActor(c);
+  const clientId = c.env.ZOOM_CLIENT_ID;
+  const clientSecret = c.env.ZOOM_CLIENT_SECRET;
+  const encryptionKey = c.env.DATA_ENCRYPTION_KEY;
+  if (!clientId || !clientSecret) throw serverError("Zoomアプリの資格情報が未設定です");
+  if (!encryptionKey) throw serverError("暗号鍵が未設定です");
+
+  const body = await parseBody(c, createMeetingSchema);
+  const token = await getAccessToken(c.env.DB, actor.organizationId, clientId, clientSecret, encryptionKey);
+
+  let meeting;
+  try {
+    meeting = await createMeeting(token, {
+      topic: body.topic,
+      startTime: body.startTime,
+      durationMin: body.durationMin,
+    });
+  } catch (err) {
+    throw serverError(err instanceof Error ? err.message : "Zoomミーティングの作成に失敗しました");
+  }
+
+  const meetingId = String(meeting.id);
+  const db = drizzle(c.env.DB);
+  const values = {
+    organizationId: actor.organizationId,
+    meetingId,
+    topic: meeting.topic ?? body.topic,
+    joinUrl: meeting.join_url ?? null,
+    startTime: meeting.start_time ? Date.parse(meeting.start_time) : null,
+    duration: meeting.duration ?? null,
+    lastSyncedAt: Date.now(),
+    updatedAt: Date.now(),
+  };
+  await db
+    .insert(zoomMeetings)
+    .values({ id: newId("zoomMeeting"), ...values })
+    .onConflictDoUpdate({ target: [zoomMeetings.organizationId, zoomMeetings.meetingId], set: values });
+
+  await recordAudit(c.env.DB, {
+    organizationId: actor.organizationId,
+    actorId: actor.userId,
+    action: "zoom.meeting.create",
+    resourceType: "zoom_meeting",
+    resourceId: meetingId,
+    metadata: { topic: values.topic },
+    requestId: c.get("requestId"),
+  });
+
+  return c.json({
+    meetingId,
+    joinUrl: meeting.join_url,
+    startUrl: meeting.start_url ?? null,
+    password: meeting.password ?? null,
+    topic: values.topic,
+    startTime: meeting.start_time ?? null,
+  });
 });
 
 /* --------------------------------------------------- roster reconcile */
