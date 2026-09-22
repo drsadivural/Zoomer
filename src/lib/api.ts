@@ -150,6 +150,10 @@ export const api = {
   saveSettings: (body: Omit<MonitoringSettings, "version">) =>
     request<{ settings: MonitoringSettings }>("/settings/monitoring", { method: "PUT", body }),
 
+  /** 1:N identify a live descriptor against enrolled templates (compared server-side). */
+  identify: (descriptor: number[], engine: string, topK?: number) =>
+    request<IdentifyResponse>("/monitor/identify", { method: "POST", body: { descriptor, engine, topK } }),
+
   auditLogs: (query: Record<string, string | undefined> = {}) =>
     request<{ logs: AuditLog[] }>("/audit", { query }),
 
@@ -346,6 +350,21 @@ export interface MonitorResponse {
     byStatus: Record<string, number>;
   };
   missed: unknown[];
+}
+
+export interface IdentifyMatch {
+  traineeId: string;
+  name: string;
+  externalId: string;
+  score: number;
+}
+
+export interface IdentifyResponse {
+  threshold: number;
+  enrolledTrainees: number;
+  matched: boolean;
+  best: IdentifyMatch | null;
+  matches: IdentifyMatch[];
 }
 
 export interface MonitoringEvent {

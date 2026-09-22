@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useSearchParams } from "react-router-dom";
 import {
-  AlertTriangle, CheckCircle2, Eye, EyeOff, Filter, Link2, RefreshCcw, ShieldCheck, Users, Video,
+  AlertTriangle, CheckCircle2, Eye, EyeOff, Filter, Link2, RefreshCcw, ScanFace, ShieldCheck, Users, Video,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
@@ -42,6 +42,7 @@ export function MonitorScreen() {
   const [evidenceUrl, setEvidenceUrl] = useState<string | null>(null);
   const [syncing, setSyncing] = useState(false);
   const [notice, setNotice] = useState<string | null>(null);
+  const [camOpen, setCamOpen] = useState(false);
   const cursorRef = useRef(0);
   const socketRef = useRef<WebSocket | null>(null);
 
@@ -220,6 +221,10 @@ export function MonitorScreen() {
             <RefreshCcw className="size-3.5" />
             更新
           </Button>
+          <Button size="sm" className="gap-1.5" onClick={() => setCamOpen(true)}>
+            <ScanFace className="size-3.5" />
+            カメラを追加
+          </Button>
         </div>
       </div>
 
@@ -388,7 +393,7 @@ export function MonitorScreen() {
         </>
       )}
 
-      <LocalCameraMonitor />
+      <LocalCameraMonitor open={camOpen} onOpenChange={setCamOpen} />
 
       <Dialog open={Boolean(reviewTarget)} onOpenChange={(v) => !v && setReviewTarget(null)}>
         <DialogContent>
