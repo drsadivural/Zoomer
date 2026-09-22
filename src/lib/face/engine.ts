@@ -237,7 +237,10 @@ export async function analyseFrame(
   }
 
   const api = faceapi;
-  const base = api.detectAllFaces(video, detectorOpts(api)).withFaceLandmarks(true);
+  // withFaceLandmarks() uses the full 68-point net that loadModels() loads;
+  // passing `true` would select the tiny landmark net, which is neither loaded
+  // nor shipped in public/models and throws once a face is actually found.
+  const base = api.detectAllFaces(video, detectorOpts(api)).withFaceLandmarks();
   const results = options.withDescriptor ? await base.withFaceDescriptors() : await base;
 
   const faces: FaceObservation[] = results.map((r) => {

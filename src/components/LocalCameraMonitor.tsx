@@ -61,6 +61,7 @@ export function LocalCameraMonitor({ open, onOpenChange }: { open: boolean; onOp
   const multiCounted = useRef(false);
   const thresholdsRef = useRef<Thresholds>(DEFAULTS);
   const identifyingRef = useRef(false);
+  const analyzeErrLogged = useRef(false);
   const lastIdentifyAt = useRef(0);
   const identityKeyRef = useRef<string>("");
   const logSeq = useRef(0);
@@ -259,6 +260,7 @@ export function LocalCameraMonitor({ open, onOpenChange }: { open: boolean; onOp
         inFlightRef.current = true;
         try {
           const result = await analyseFrame(videoRef.current, { withDescriptor: false });
+          analyzeErrLogged.current = false;
           if (active) {
             setAnalysis(result);
             setLiveness(livenessRef.current.observe(largestFace(result)));
@@ -268,8 +270,14 @@ export function LocalCameraMonitor({ open, onOpenChange }: { open: boolean; onOp
               void runIdentify();
             }
           }
-        } catch {
-          /* dropped frame */
+        } catch (e) {
+          // Never swallow a persistent engine failure silently — surface it once.
+          if (active && !analyzeErrLogged.current) {
+            analyzeErrLogged.current = true;
+            const msg = e instanceof Error ? e.message : "解析に失敗しました";
+            addLog("danger", `解析エラー: ${msg}`);
+            setStatus({ message: "解析エラー（顔認識エンジン）", tone: "danger" });
+          }
         } finally {
           inFlightRef.current = false;
         }
