@@ -12,6 +12,7 @@
  * which holds the enrolled template — so the template never reaches the browser.
  */
 import { analyseFrame, captureFrame, descriptorToArray, EyeClosureTracker, largestFace, MODEL_VERSION } from "./engine";
+import { BlinkTracker, detectBlink, eyeModelReady, loadEyeModel } from "./eye-state";
 
 export interface MonitorRules {
   reauthIntervalSec: number;
@@ -86,6 +87,7 @@ export class MonitoringLoop {
   private absentReportedAt: number | null = null;
   private eyesClosedSince: number | null = null;
   private readonly eyeTracker = new EyeClosureTracker();
+  private readonly blinkTracker = new BlinkTracker();
   private eyesClosedReportedAt: number | null = null;
   private multiFaceFrames = 0;
   private multiFaceReportedAt: number | null = null;
@@ -108,6 +110,8 @@ export class MonitoringLoop {
     if (!this.stopped) return;
     this.stopped = false;
     this.eyeTracker.reset();
+    this.blinkTracker.reset();
+    void loadEyeModel().catch(() => undefined);
     document.addEventListener("visibilitychange", this.onVisibility);
     window.addEventListener("online", this.onOnline);
     window.addEventListener("offline", this.onOffline);
@@ -216,8 +220,16 @@ export class MonitoringLoop {
     }
 
     /* ---- eyes closed (drowsiness *suspicion* only) ---- */
-    // Relative to the trainee's own open-eye baseline; see EyeClosureTracker.
-    const eyeClosed = this.eyeTracker.update(face ? face.eyeAspectRatio : null).closed;
+    // Prefer MediaPipe's eyeBlink blendshape (reliable); fall back to the
+    // face-api EAR tracker if the MediaPipe model has not loaded.
+    let eyeClosed: boolean;
+    if (eyeModelReady()) {
+      const blink = detectBlink(this.video, performance.now());
+      eyeClosed = blink != null ? this.blinkTracker.update(blink) : false;
+      if (blink == null) this.blinkTracker.reset();
+    } else {
+      eyeClosed = this.eyeTracker.update(face ? face.eyeAspectRatio : null).closed;
+    }
     if (eyeClosed) {
       this.eyesClosedSince ??= now;
       const durationMs = now - this.eyesClosedSince;

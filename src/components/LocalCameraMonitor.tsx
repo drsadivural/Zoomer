@@ -27,6 +27,7 @@ import {
   loadModels, MODEL_VERSION, type FaceObservation, type FrameAnalysis,
 } from "@/lib/face/engine";
 import { LivenessDetector, type LivenessResult } from "@/lib/face/liveness";
+import { BlinkTracker, detectBlink, eyeModelReady, loadEyeModel } from "@/lib/face/eye-state";
 import { api, ApiClientError, type IdentifyResponse } from "@/lib/api";
 import { useCan } from "@/lib/auth-context";
 
@@ -67,6 +68,7 @@ export function LocalCameraMonitor({ open, onOpenChange }: { open: boolean; onOp
   const identifyingRef = useRef(false);
   const analyzeErrLogged = useRef(false);
   const eyeTrackerRef = useRef(new EyeClosureTracker());
+  const blinkTrackerRef = useRef(new BlinkTracker());
   const lastIdentifyAt = useRef(0);
   const identityKeyRef = useRef<string>("");
   const logSeq = useRef(0);
@@ -79,7 +81,7 @@ export function LocalCameraMonitor({ open, onOpenChange }: { open: boolean; onOp
   const [tallies, setTallies] = useState<Tallies>({ absent: 0, multiple: 0, eyesClosed: 0, impostor: 0 });
   const [thresholds, setThresholds] = useState<Thresholds>(DEFAULTS);
   const [identity, setIdentity] = useState<IdentifyResponse | null>(null);
-  const [eye, setEye] = useState<{ ear: number | null; baseline: number; closed: boolean }>({ ear: null, baseline: 0, closed: false });
+  const [eye, setEye] = useState<{ closed: boolean; source: "blink" | "ear" | "none"; value: number | null }>({ closed: false, source: "none", value: null });
   const [log, setLog] = useState<LogEntry[]>([]);
 
   const can = useCan();
@@ -112,6 +114,8 @@ export function LocalCameraMonitor({ open, onOpenChange }: { open: boolean; onOp
       setError("顔認識モデルの読み込みに失敗しました。通信環境を確認して再試行してください。");
       return;
     }
+    // Eye-state model loads in the background; on failure we fall back to the EAR tracker.
+    void loadEyeModel().catch(() => undefined);
     try {
       const { settings } = await api.getSettings();
       const t: Thresholds = {
@@ -138,10 +142,11 @@ export function LocalCameraMonitor({ open, onOpenChange }: { open: boolean; onOp
       multiFrames.current = 0; multiCounted.current = false;
       identityKeyRef.current = ""; lastIdentifyAt.current = 0;
       eyeTrackerRef.current.reset();
+      blinkTrackerRef.current.reset();
       livenessRef.current.reset();
       setTallies({ absent: 0, multiple: 0, eyesClosed: 0, impostor: 0 });
       setIdentity(null);
-      setEye({ ear: null, baseline: 0, closed: false });
+      setEye({ closed: false, source: "none", value: null });
       setCamState("ready");
       addLog("neutral", "解析を開始しました");
     } catch (err) {
@@ -246,12 +251,27 @@ export function LocalCameraMonitor({ open, onOpenChange }: { open: boolean; onOp
         multiFrames.current = 0; multiCounted.current = false;
       }
 
-      // Eyes closed (drowsiness *suspicion* only) — judged against the person's
-      // own running open-eye baseline, since absolute EAR varies widely by face.
-      const eyeState = eyeTrackerRef.current.update(face ? face.eyeAspectRatio : null);
-      setEye(eyeState);
+      // Eyes closed (drowsiness *suspicion* only). Prefer MediaPipe's eyeBlink
+      // blendshape (reliable); fall back to the face-api EAR tracker if the
+      // MediaPipe model has not loaded (older device / network failure).
+      let eyeClosed: boolean;
+      if (eyeModelReady() && videoRef.current) {
+        const blink = detectBlink(videoRef.current, performance.now());
+        if (blink != null) {
+          eyeClosed = blinkTrackerRef.current.update(blink);
+          setEye({ closed: eyeClosed, source: "blink", value: blink });
+        } else {
+          blinkTrackerRef.current.reset();
+          eyeClosed = false;
+          setEye({ closed: false, source: face ? "blink" : "none", value: face ? 0 : null });
+        }
+      } else {
+        const s = eyeTrackerRef.current.update(face ? face.eyeAspectRatio : null);
+        eyeClosed = s.closed;
+        setEye({ closed: s.closed, source: s.ear != null ? "ear" : "none", value: s.ear });
+      }
 
-      if (eyeState.closed) {
+      if (eyeClosed) {
         if (eyesSince.current == null) eyesSince.current = now;
         if (!eyesCounted.current && now - eyesSince.current >= t.eyesClosedSec * 1000) {
           eyesCounted.current = true;
@@ -487,7 +507,7 @@ export function LocalCameraMonitor({ open, onOpenChange }: { open: boolean; onOp
               <Metric label="顔の向き" value={primary ? poseLabel(quality.yaw, quality.pitch) : "—"} />
               <Metric
                 label="目の開閉"
-                value={eye.ear != null ? `${eyesClosed ? "閉" : "開"}（${eye.ear.toFixed(2)}）` : "—"}
+                value={eye.value != null ? `${eyesClosed ? "閉" : "開"}（${eye.value.toFixed(2)}）` : "—"}
                 tone={eyesClosed ? "warning" : undefined}
               />
               <Metric label="瞬き" value={`${liveness?.blinks ?? 0}回`} />
