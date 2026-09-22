@@ -64,8 +64,52 @@ export const EMPTY_QUALITY: QualityMetrics = {
   occlusion: 1,
 };
 
-/** Below this the eye is treated as closed. Calibrate per deployment. */
+/** Below this the eye is treated as closed. Used by blink/liveness detection,
+ *  where a sharp transient is what matters. Sustained-closure (drowsiness)
+ *  detection uses the adaptive tracker below instead. */
 export const EAR_CLOSED_THRESHOLD = 0.21;
+
+/**
+ * Sustained eye-closure, judged relative to the person's own open-eye baseline.
+ * face-api's 68-point EAR sits near ~0.30 for open eyes and only drops modestly
+ * on closure, and its absolute value varies a lot by face, camera and distance —
+ * so a fixed cutoff misses real closures. A relative one is both more sensitive
+ * and self-calibrating.
+ */
+export const EYE_CLOSED_RATIO = 0.8; // closed when EAR < this × open baseline
+export const EYE_CLOSED_CAP = 0.27;  // effective cutoff never demands eyes wider than this
+export const EYE_CLOSED_FLOOR = 0.16; // …and never triggers above near-shut eyes
+export const EYE_BASELINE_MIN = 0.18; // need a plausible open baseline before trusting closure
+
+export function eyeCutoff(baseline: number): number {
+  return Math.min(EYE_CLOSED_CAP, Math.max(EYE_CLOSED_FLOOR, baseline * EYE_CLOSED_RATIO));
+}
+
+export interface EyeClosureState {
+  ear: number | null;
+  baseline: number;
+  closed: boolean;
+}
+
+/**
+ * Tracks the running open-eye EAR baseline (slow decay so a long blink cannot
+ * drag it down) and reports whether the current frame's eye is closed relative
+ * to it. Feed the largest face's EAR each frame, or null when no face is present.
+ */
+export class EyeClosureTracker {
+  private baseline = 0;
+
+  reset(): void {
+    this.baseline = 0;
+  }
+
+  update(ear: number | null): EyeClosureState {
+    if (ear != null) this.baseline = Math.max(ear, this.baseline * 0.999);
+    const baseline = this.baseline;
+    const closed = ear != null && baseline >= EYE_BASELINE_MIN && ear < eyeCutoff(baseline);
+    return { ear, baseline, closed };
+  }
+}
 
 /**
  * face-api bundles its own TFJS runtime and re-exports it as `tf`, but the

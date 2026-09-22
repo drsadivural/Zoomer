@@ -23,7 +23,7 @@ import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from "@/components/ui/dialog";
 import { StatusBadge } from "@/components/shell/primitives";
 import {
-  analyseFrame, descriptorToArray, EMPTY_QUALITY, ENGINE_ID, largestFace,
+  analyseFrame, descriptorToArray, EMPTY_QUALITY, ENGINE_ID, EyeClosureTracker, largestFace,
   loadModels, MODEL_VERSION, type FaceObservation, type FrameAnalysis,
 } from "@/lib/face/engine";
 import { LivenessDetector, type LivenessResult } from "@/lib/face/liveness";
@@ -43,22 +43,6 @@ const DEFAULTS: Thresholds = { absenceSec: 60, eyesClosedSec: 10, multiFaceFrame
 interface LogEntry { id: number; at: number; tone: Tone; text: string }
 
 const IDENTIFY_INTERVAL_MS = 3000;
-
-/**
- * Eye closure from face-api's 68-point landmarks is best judged *relative* to
- * each person's own open-eye baseline: absolute EAR varies a lot by face, camera
- * and distance (open EAR is ~0.30 for many faces but far lower for others), so a
- * fixed 0.21 cutoff misses real closures. We track the running open baseline and
- * treat the eye as closed when the EAR drops below a fraction of it.
- */
-const EYE_CLOSED_RATIO = 0.80; // closed when EAR < this × open baseline
-const EYE_CLOSED_CAP = 0.27;   // effective cutoff never demands eyes wider than this
-const EYE_CLOSED_FLOOR = 0.16; // …and never triggers above near-shut eyes
-const EYE_BASELINE_MIN = 0.18; // need a plausible open baseline before trusting closure
-
-function eyeCutoff(baseline: number): number {
-  return Math.min(EYE_CLOSED_CAP, Math.max(EYE_CLOSED_FLOOR, baseline * EYE_CLOSED_RATIO));
-}
 
 function poseLabel(yaw: number, pitch: number): string {
   if (Math.abs(yaw) < 0.15 && Math.abs(pitch) < 0.15) return "正面";
@@ -82,7 +66,7 @@ export function LocalCameraMonitor({ open, onOpenChange }: { open: boolean; onOp
   const thresholdsRef = useRef<Thresholds>(DEFAULTS);
   const identifyingRef = useRef(false);
   const analyzeErrLogged = useRef(false);
-  const earBaselineRef = useRef(0);
+  const eyeTrackerRef = useRef(new EyeClosureTracker());
   const lastIdentifyAt = useRef(0);
   const identityKeyRef = useRef<string>("");
   const logSeq = useRef(0);
@@ -153,7 +137,7 @@ export function LocalCameraMonitor({ open, onOpenChange }: { open: boolean; onOp
       eyesSince.current = null; eyesCounted.current = false;
       multiFrames.current = 0; multiCounted.current = false;
       identityKeyRef.current = ""; lastIdentifyAt.current = 0;
-      earBaselineRef.current = 0;
+      eyeTrackerRef.current.reset();
       livenessRef.current.reset();
       setTallies({ absent: 0, multiple: 0, eyesClosed: 0, impostor: 0 });
       setIdentity(null);
@@ -264,13 +248,10 @@ export function LocalCameraMonitor({ open, onOpenChange }: { open: boolean; onOp
 
       // Eyes closed (drowsiness *suspicion* only) — judged against the person's
       // own running open-eye baseline, since absolute EAR varies widely by face.
-      const ear = face ? face.eyeAspectRatio : null;
-      if (ear != null) earBaselineRef.current = Math.max(ear, earBaselineRef.current * 0.999);
-      const baseline = earBaselineRef.current;
-      const closed = ear != null && baseline >= EYE_BASELINE_MIN && ear < eyeCutoff(baseline);
-      setEye({ ear, baseline, closed });
+      const eyeState = eyeTrackerRef.current.update(face ? face.eyeAspectRatio : null);
+      setEye(eyeState);
 
-      if (closed) {
+      if (eyeState.closed) {
         if (eyesSince.current == null) eyesSince.current = now;
         if (!eyesCounted.current && now - eyesSince.current >= t.eyesClosedSec * 1000) {
           eyesCounted.current = true;

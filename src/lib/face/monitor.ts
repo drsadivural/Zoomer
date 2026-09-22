@@ -11,7 +11,7 @@
  * Matching is *not* done here. The live descriptor is posted to the server,
  * which holds the enrolled template — so the template never reaches the browser.
  */
-import { analyseFrame, captureFrame, descriptorToArray, largestFace, EAR_CLOSED_THRESHOLD, MODEL_VERSION } from "./engine";
+import { analyseFrame, captureFrame, descriptorToArray, EyeClosureTracker, largestFace, MODEL_VERSION } from "./engine";
 
 export interface MonitorRules {
   reauthIntervalSec: number;
@@ -85,6 +85,7 @@ export class MonitoringLoop {
   private absentSince: number | null = null;
   private absentReportedAt: number | null = null;
   private eyesClosedSince: number | null = null;
+  private readonly eyeTracker = new EyeClosureTracker();
   private eyesClosedReportedAt: number | null = null;
   private multiFaceFrames = 0;
   private multiFaceReportedAt: number | null = null;
@@ -106,6 +107,7 @@ export class MonitoringLoop {
   start(): void {
     if (!this.stopped) return;
     this.stopped = false;
+    this.eyeTracker.reset();
     document.addEventListener("visibilitychange", this.onVisibility);
     window.addEventListener("online", this.onOnline);
     window.addEventListener("offline", this.onOffline);
@@ -214,7 +216,9 @@ export class MonitoringLoop {
     }
 
     /* ---- eyes closed (drowsiness *suspicion* only) ---- */
-    if (face && face.eyeAspectRatio < EAR_CLOSED_THRESHOLD) {
+    // Relative to the trainee's own open-eye baseline; see EyeClosureTracker.
+    const eyeClosed = this.eyeTracker.update(face ? face.eyeAspectRatio : null).closed;
+    if (eyeClosed) {
       this.eyesClosedSince ??= now;
       const durationMs = now - this.eyesClosedSince;
       const due =
