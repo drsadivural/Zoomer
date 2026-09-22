@@ -675,7 +675,7 @@ app.post("/events", requireDevice, async (c) => {
 
 /* ------------------------------------------------------------- internals */
 
-async function storeEvidence(
+export async function storeEvidence(
   env: Env,
   input: {
     organizationId: string;
@@ -723,7 +723,7 @@ async function storeEvidence(
   }
 }
 
-async function upsertAlert(
+export async function upsertAlert(
   env: Env,
   input: {
     organizationId: string;

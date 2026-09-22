@@ -16,6 +16,8 @@ export interface Env {
   ZOOM_WEBHOOK_SECRET_TOKEN?: string;
   DATA_ENCRYPTION_KEY?: string;
   SESSION_SIGNING_KEY?: string;
+  /** Shared secret the Zoom Meeting-SDK bot presents to POST recognition events. */
+  BOT_INGEST_TOKEN?: string;
 }
 
 export type Role = "sys_admin" | "training_admin" | "auditor";
