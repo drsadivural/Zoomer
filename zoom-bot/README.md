@@ -32,10 +32,14 @@ join a meeting until you supply Meeting-SDK credentials and raw-data access
 6. The extracted Meeting SDK at `/home/ubuntu/zoom-meeting-sdk` (headers in `h/`,
    `libmeetingsdk.so`, bundled `qt_libs`).
 
-## Build
+## Build  ✅ verified: compiles + links against Meeting SDK 7.1.5 on this VM
 ```bash
+# The SDK ships libmeetingsdk.so but its SONAME is libmeetingsdk.so.1 — symlink it once:
+ln -sf libmeetingsdk.so /home/ubuntu/zoom-meeting-sdk/libmeetingsdk.so.1
 cd zoom-bot && cmake -B build -DZOOM_SDK_DIR=/home/ubuntu/zoom-meeting-sdk && cmake --build build -j
 ```
+The binary runs to its config check today (`env -i ./build/zoomer-bot` → "missing config").
+It will join a meeting once ZOOM_SDK_KEY/SECRET + raw-data access are provided.
 
 ## Run
 ```bash

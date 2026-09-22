@@ -4,6 +4,7 @@
 #include "zoom_sdk.h"
 #include "auth_service_interface.h"
 #include "meeting_service_interface.h"
+#include "meeting_service_components/meeting_audio_interface.h"  // defines AudioType (used by participants ctrl)
 #include "meeting_service_components/meeting_participants_ctrl_interface.h"
 #include "rawdata/zoom_rawdata_api.h"
 
@@ -19,7 +20,7 @@
 #include <map>
 #include <thread>
 
-using namespace ZOOMSDK;  // TODO(sdk): confirm namespace macro
+using namespace ZOOMSDK;
 
 namespace {
 Config g_cfg;
@@ -108,8 +109,10 @@ class MeetingEvent : public IMeetingServiceEvent {
   void onSuspendParticipantsActivities() override {}
   void onAICompanionActiveChangeNotice(bool) override {}
   void onMeetingTopicChanged(const zchar_t*) override {}
-  // TODO(sdk): implement IMeetingParticipantsCtrlEvent (onUserJoin/onUserLeft)
-  // to call subscribeUser/unsubscribeUser as people come and go.
+  void onMeetingFullToWatchLiveStream(const zchar_t*) override {}
+  void onUserNetworkStatusChanged(MeetingComponentType, ConnectionQuality, unsigned int, bool) override {}
+  // TODO(sdk): also register IMeetingParticipantsCtrlEvent (onUserJoin/onUserLeft)
+  // via GetMeetingParticipantsController()->SetEvent(...) to add/remove renderers live.
 };
 
 // Flush queued events to Zoomer every second.
@@ -139,7 +142,6 @@ int main(int argc, char** argv) {
 
   InitParam ip;
   ip.strWebDomain = "https://zoom.us";
-  ip.enableRawdataIntermediateMode = true;   // TODO(sdk): confirm raw-data enable flag/name
   if (InitSDK(ip) != SDKERR_SUCCESS) { std::fprintf(stderr, "InitSDK failed\n"); return 1; }
 
   IAuthService* auth = nullptr;
