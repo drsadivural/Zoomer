@@ -28,7 +28,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v7
         with:
           # Must match the toolchain this project is developed and deployed with.
           # Node 22 ships npm 10, which crashes with "Exit handler never called!"
