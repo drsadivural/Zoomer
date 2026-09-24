@@ -63,35 +63,72 @@ app.get("/authorize", requireAuth, requirePermission("integration:manage"), asyn
 
 /* -------------------------------------------------------- OAuth callback */
 
+/**
+ * A browser lands here from zoom.us, so this handler must never answer with a
+ * JSON error envelope the way the rest of the API does — the person clicked a
+ * button and deserves to end up back on the settings screen with a readable
+ * reason. Every failure path redirects; only the outcome differs.
+ *
+ * It also logs one structured line per attempt, because "nothing happened" is
+ * otherwise indistinguishable from "Zoom never called us", and those two have
+ * completely different fixes.
+ */
 app.get("/oauth/callback", async (c) => {
+  const fail = (stage: string, reason: string) => {
+    console.warn(
+      JSON.stringify({ level: "warn", message: "zoom oauth callback failed", stage, reason }),
+    );
+    return c.redirect(
+      `/settings?zoom=error&stage=${encodeURIComponent(stage)}&reason=${encodeURIComponent(reason)}`,
+      302,
+    );
+  };
+
   const code = c.req.query("code");
   const state = c.req.query("state");
   const error = c.req.query("error");
 
-  if (error) {
-    return c.redirect(`/settings?zoom=error&reason=${encodeURIComponent(error)}`, 302);
-  }
-  if (!code || !state) throw badRequest("codeまたはstateがありません");
+  console.log(
+    JSON.stringify({
+      level: "info",
+      message: "zoom oauth callback hit",
+      hasCode: Boolean(code),
+      hasState: Boolean(state),
+      error: error ?? null,
+    }),
+  );
+
+  if (error) return fail("zoom", c.req.query("error_description") ?? error);
+  if (!code || !state) return fail("request", "Zoomから code / state が返されませんでした");
 
   const clientId = c.env.ZOOM_CLIENT_ID;
   const clientSecret = c.env.ZOOM_CLIENT_SECRET;
   const signingKey = c.env.SESSION_SIGNING_KEY;
   const encryptionKey = c.env.DATA_ENCRYPTION_KEY;
-  if (!clientId || !clientSecret) throw serverError("Zoomアプリの資格情報が未設定です");
-  if (!signingKey || !encryptionKey) throw serverError("鍵が未設定です");
+  if (!clientId || !clientSecret) return fail("config", "Zoomアプリの資格情報が未設定です");
+  if (!signingKey || !encryptionKey) return fail("config", "暗号鍵が未設定です");
 
   let parsed: { o: string; u: string; t: number; s: string };
   try {
     parsed = JSON.parse(atob(state));
   } catch {
-    throw badRequest("stateが不正です");
+    return fail("state", "stateの形式が不正です");
   }
 
   const expected = await hmacSha256Base64(signingKey, `${parsed.o}:${parsed.u}:${parsed.t}`);
-  if (!timingSafeEqual(expected, parsed.s)) throw badRequest("stateの署名が一致しません");
-  if (Date.now() - parsed.t > 10 * 60 * 1000) throw badRequest("認可フローの有効期限が切れています");
+  if (!timingSafeEqual(expected, parsed.s)) return fail("state", "stateの署名が一致しません");
+  if (Date.now() - parsed.t > 10 * 60 * 1000) {
+    return fail("state", "認可フローの有効期限が切れています（10分）。もう一度お試しください");
+  }
 
-  const tokens = await exchangeCode(clientId, clientSecret, code, redirectUri(c.env));
+  let tokens;
+  try {
+    tokens = await exchangeCode(clientId, clientSecret, code, redirectUri(c.env));
+  } catch (err) {
+    // Almost always a client-secret mismatch or a redirect_uri that differs
+    // from the one registered — Zoom's own message is the useful part here.
+    return fail("token", err instanceof Error ? err.message : "トークン交換に失敗しました");
+  }
 
   // Record which Zoom account this is: webhook deliveries carry only
   // `payload.account_id`, and that is how they get routed back to this tenant.
@@ -102,7 +139,11 @@ app.get("/oauth/callback", async (c) => {
     // Non-fatal: a single connected tenant is still resolvable without it.
   }
 
-  await saveTokens(c.env.DB, parsed.o, tokens, encryptionKey, parsed.u);
+  try {
+    await saveTokens(c.env.DB, parsed.o, tokens, encryptionKey, parsed.u);
+  } catch (err) {
+    return fail("save", err instanceof Error ? err.message : "トークンの保存に失敗しました");
+  }
 
   await recordAudit(c.env.DB, {
     organizationId: parsed.o,
@@ -114,6 +155,9 @@ app.get("/oauth/callback", async (c) => {
     requestId: c.get("requestId"),
   });
 
+  console.log(
+    JSON.stringify({ level: "info", message: "zoom connected", organizationId: parsed.o, scope: tokens.scope }),
+  );
   return c.redirect("/settings?zoom=connected", 302);
 });
 

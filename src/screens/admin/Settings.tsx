@@ -10,6 +10,16 @@ import { MeetingMonitoringSettingsCard } from "@/components/meeting-monitoring/M
 import { formatDateTime } from "@/lib/format";
 import { useCan } from "@/lib/auth-context";
 
+/** Which step of the OAuth callback failed, in the operator's language. */
+const STAGE_LABELS: Record<string, string> = {
+  zoom: "Zoom側で拒否",
+  request: "Zoomからの応答",
+  config: "サーバー設定",
+  state: "state検証",
+  token: "トークン交換",
+  save: "保存",
+};
+
 export function SettingsScreen() {
   const can = useCan();
   const [params] = useSearchParams();
@@ -36,7 +46,13 @@ export function SettingsScreen() {
     load();
     const zoomParam = params.get("zoom");
     if (zoomParam === "connected") setNotice("Zoom連携を接続しました。");
-    if (zoomParam === "error") setNotice(`Zoom連携に失敗しました: ${params.get("reason") ?? "不明なエラー"}`);
+    if (zoomParam === "error") {
+      // The callback tells us which step failed; without it "接続に失敗" is
+      // indistinguishable between a bad secret, a stale state and a Zoom refusal.
+      const stage = params.get("stage");
+      const where = stage ? `（${STAGE_LABELS[stage] ?? stage}）` : "";
+      setNotice(`Zoom連携に失敗しました${where}: ${params.get("reason") ?? "不明なエラー"}`);
+    }
   }, [params]);
 
   async function save() {
