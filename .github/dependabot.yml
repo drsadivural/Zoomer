@@ -20,10 +20,10 @@ updates:
       minor-and-patch:
         applies-to: version-updates
         update-types: [minor, patch]
-      # Majors are grouped but separate: they need real testing, not a rubber stamp.
-      major:
-        applies-to: version-updates
-        update-types: [major]
+    # Majors are deliberately NOT grouped. Batching them produced a single branch
+    # trying to land vite 8, vitest 5, zod 4 and react-day-picker 10 together,
+    # which Dependabot could not resolve and which nobody could review honestly.
+    # They arrive one per PR instead, each independently testable.
 
   - package-ecosystem: github-actions
     directory: /
