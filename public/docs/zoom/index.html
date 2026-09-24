@@ -1,0 +1,419 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Ayonix Zoomer for Zoom — Add, Use and Remove | Ayonix</title>
+    <meta
+      name="description"
+      content="How to add, use and remove the Ayonix Zoomer app for Zoom: installation, connecting your Zoom account, monitoring a training meeting, reports, uninstalling, data handling and support."
+    />
+    <link rel="icon" href="/favicon.svg" type="image/svg+xml" />
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700;800&family=Noto+Sans+JP:wght@400;500;700&display=swap"
+      rel="stylesheet"
+    />
+    <style>
+      /* No inline <script> anywhere on this page: the site's Content-Security-Policy
+         allows 'unsafe-inline' for styles only, never for scripts. */
+      :root {
+        --navy: #0b1b3a;
+        --ink: #0f172a;
+        --muted: #475569;
+        --line: #e2e8f0;
+        --cyan: #06b6d4;
+        --cyan-dark: #0e7490;
+        --bg: #f4f7fb;
+        --warn-bg: #fffbeb;
+        --warn-line: #fcd34d;
+      }
+      * { box-sizing: border-box; }
+      body {
+        margin: 0;
+        background: var(--bg);
+        color: var(--ink);
+        font-family: Inter, "Noto Sans JP", system-ui, sans-serif;
+        line-height: 1.7;
+        -webkit-font-smoothing: antialiased;
+      }
+      header {
+        background: linear-gradient(135deg, var(--navy), #13294f);
+        color: #fff;
+        padding: 2.5rem 1.25rem 2rem;
+      }
+      .wrap { max-width: 860px; margin: 0 auto; }
+      .brand { display: flex; align-items: center; gap: 0.75rem; }
+      .mark {
+        width: 40px; height: 40px; border-radius: 11px;
+        background: linear-gradient(135deg, var(--cyan), #3b82f6);
+        display: grid; place-items: center;
+        font-weight: 800; font-size: 1.25rem;
+      }
+      .brand-name { font-weight: 800; letter-spacing: 0.12em; font-size: 0.95rem; }
+      .brand-sub { color: #67e8f9; font-weight: 600; letter-spacing: 0.2em; font-size: 0.68rem; }
+      h1 { font-size: 1.9rem; margin: 1.25rem 0 0.5rem; line-height: 1.3; }
+      header p { margin: 0; color: #cbd5e1; max-width: 60ch; }
+      main { max-width: 860px; margin: 0 auto; padding: 0 1.25rem 4rem; }
+      section {
+        background: #fff; border: 1px solid var(--line); border-radius: 16px;
+        padding: 1.5rem 1.5rem 1.75rem; margin-top: 1.5rem;
+        box-shadow: 0 1px 2px rgba(15, 23, 42, 0.04);
+      }
+      h2 { font-size: 1.3rem; margin: 0 0 0.75rem; }
+      h3 { font-size: 1.02rem; margin: 1.5rem 0 0.4rem; }
+      p, li { color: var(--muted); }
+      li { margin: 0.3rem 0; }
+      ol, ul { padding-left: 1.25rem; }
+      strong { color: var(--ink); }
+      a { color: var(--cyan-dark); }
+      code {
+        background: #f1f5f9; border: 1px solid var(--line); border-radius: 6px;
+        padding: 0.1rem 0.35rem; font-size: 0.87em;
+        font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+        color: var(--ink); word-break: break-all;
+      }
+      .toc { display: flex; flex-wrap: wrap; gap: 0.5rem; margin-top: 1.25rem; }
+      .toc a {
+        background: rgba(255, 255, 255, 0.1); color: #e0f2fe; text-decoration: none;
+        border: 1px solid rgba(255, 255, 255, 0.18); border-radius: 999px;
+        padding: 0.3rem 0.8rem; font-size: 0.82rem; font-weight: 600;
+      }
+      .note {
+        background: var(--warn-bg); border: 1px solid var(--warn-line);
+        border-radius: 12px; padding: 0.9rem 1.1rem; margin: 1rem 0;
+      }
+      .note p { color: #78350f; margin: 0; }
+      table { width: 100%; border-collapse: collapse; margin-top: 0.75rem; font-size: 0.93rem; }
+      th, td { text-align: left; padding: 0.55rem 0.6rem; border-bottom: 1px solid var(--line); vertical-align: top; }
+      th { color: var(--ink); font-weight: 700; }
+      td { color: var(--muted); }
+      footer { max-width: 860px; margin: 0 auto; padding: 0 1.25rem 3rem; color: #64748b; font-size: 0.86rem; }
+      .ja { font-family: "Noto Sans JP", Inter, system-ui, sans-serif; }
+      hr { border: 0; border-top: 1px solid var(--line); margin: 2rem 0 0; }
+      @media (max-width: 600px) { h1 { font-size: 1.5rem; } section { padding: 1.15rem; } }
+    </style>
+  </head>
+  <body>
+    <header>
+      <div class="wrap">
+        <div class="brand">
+          <div class="mark">A</div>
+          <div>
+            <div class="brand-name">AYONIX</div>
+            <div class="brand-sub">ZOOMER</div>
+          </div>
+        </div>
+        <h1>Ayonix Zoomer for Zoom</h1>
+        <p>
+          How to add, use and remove the app, what data it processes, and how to get help.
+          日本語の説明は<a href="#ja" style="color:#67e8f9">このページの後半</a>にあります。
+        </p>
+        <nav class="toc">
+          <a href="#about">What it does</a>
+          <a href="#requirements">Requirements</a>
+          <a href="#add">Adding the app</a>
+          <a href="#use">Using the app</a>
+          <a href="#remove">Removing the app</a>
+          <a href="#data">Data handling</a>
+          <a href="#trouble">Troubleshooting</a>
+          <a href="#support">Support</a>
+          <a href="#ja">日本語</a>
+        </nav>
+      </div>
+    </header>
+
+    <main>
+      <section id="about">
+        <h2>What Ayonix Zoomer does</h2>
+        <p>
+          Ayonix Zoomer is an attendance-integrity console for organisations that deliver
+          compulsory training over Zoom — compliance, certification and regulated-industry
+          courses where the organisation must be able to evidence <em>who actually attended</em>.
+        </p>
+        <p>
+          Zoom remains the meeting application. Ayonix Zoomer sits alongside it and gives the
+          meeting host a single screen showing, per participant: whether a face is visible,
+          whether that face matches the person enrolled for the course, whether the camera is on,
+          and whether anything needs the host's attention. It produces an end-of-meeting report.
+        </p>
+        <h3>What it does not do</h3>
+        <ul>
+          <li>It does <strong>not</strong> record your meeting, its audio, or its video.</li>
+          <li>
+            It does <strong>not</strong> judge attention, comprehension, mood or any other
+            psychological state. It reports only observable facts such as "a face is visible" or
+            "the camera is off".
+          </li>
+          <li>It does <strong>not</strong> read your Zoom chat, files, or cloud recordings.</li>
+          <li>It never automatically fails a trainee. Every detection is reviewed by a person.</li>
+        </ul>
+      </section>
+
+      <section id="requirements">
+        <h2>Requirements</h2>
+        <ul>
+          <li>A Zoom account that is allowed to install Marketplace apps. If your Zoom administrator has restricted app installation, ask them to pre-approve <strong>Ayonix Zoomer</strong>.</li>
+          <li>An Ayonix Zoomer account for your organisation. Contact <a href="mailto:sales@ayonix.com">sales@ayonix.com</a> if you do not have one.</li>
+          <li>A modern browser (Chrome, Edge, Safari or Firefox).</li>
+        </ul>
+      </section>
+
+      <section id="add">
+        <h2>Adding the app</h2>
+        <p>The app is connected from inside Ayonix Zoomer. You authorise it once, with your Zoom account.</p>
+        <ol>
+          <li>Sign in to <a href="https://zoomer.ayonix.com">https://zoomer.ayonix.com</a> as an administrator.</li>
+          <li>Open <strong>設定 (Settings)</strong> from the left-hand navigation.</li>
+          <li>In the <strong>Zoom連携 (Zoom integration)</strong> panel, select <strong>Zoomアカウントを接続 (Connect Zoom account)</strong>.</li>
+          <li>
+            You are redirected to Zoom. Sign in if prompted, review the permissions being
+            requested, and select <strong>Allow</strong>.
+          </li>
+          <li>
+            Zoom returns you to Ayonix Zoomer. The Zoom panel now shows
+            <strong>接続済み (Connected)</strong> together with the date of connection.
+          </li>
+        </ol>
+        <p>
+          You can also install from the Zoom App Marketplace listing by selecting
+          <strong>Add</strong>, which runs the same authorisation flow.
+        </p>
+        <h3>Permissions requested, and why</h3>
+        <table>
+          <thead>
+            <tr><th>Permission</th><th>Why the app needs it</th></tr>
+          </thead>
+          <tbody>
+            <tr><td>View your user information</td><td>Confirms which Zoom account is connected, so meetings are attached to the right organisation.</td></tr>
+            <tr><td>View your meetings</td><td>Lets an administrator pick an existing Zoom meeting to link to a training session.</td></tr>
+            <tr><td>Create meetings on your behalf</td><td>Powers the "Create Zoom meeting" button, so a training session and its Zoom meeting are created together.</td></tr>
+            <tr><td>View past meeting participants</td><td>Matches the people who attended the Zoom meeting to the trainees enrolled on the course.</td></tr>
+          </tbody>
+        </table>
+        <div class="note">
+          <p>
+            The app requests no permission to access recordings, chat, files, or other users'
+            accounts, and it never modifies your Zoom account settings.
+          </p>
+        </div>
+      </section>
+
+      <section id="use">
+        <h2>Using the app</h2>
+
+        <h3>1. Enrol your trainees</h3>
+        <p>
+          Go to <strong>受講者登録 (Enrolment)</strong> and add trainees individually or by CSV
+          import. For identity verification, capture a reference photo for each trainee with their
+          explicit consent. Only a mathematical face template is stored — the photograph itself is
+          not retained.
+        </p>
+
+        <h3>2. Create or link a training session</h3>
+        <p>
+          In <strong>研修管理 (Training sessions)</strong>, create a session. Either select
+          <strong>Zoomミーティングを作成 (Create Zoom meeting)</strong> to have the app create the
+          meeting for you, or link an existing meeting from your Zoom account. Assign the trainees
+          who should attend.
+        </p>
+
+        <h3>3. Run the meeting</h3>
+        <p>
+          Host the meeting in Zoom exactly as you normally would. In Ayonix Zoomer, open
+          <strong>ライブ会議 (Live Meeting)</strong> and select the meeting. The console shows
+          participants with their current status, highlights anyone needing attention, and lists
+          events as they open and resolve.
+        </p>
+
+        <h3>4. Review and report</h3>
+        <p>
+          After the meeting, <strong>レポート (Reports)</strong> gives attendance and participation
+          figures per trainee, exportable as CSV, JSON or PDF.
+          <strong>イベント (Events)</strong> and <strong>証跡・ログ (Audit log)</strong> hold the
+          detailed record.
+        </p>
+
+        <div class="note">
+          <p>
+            <strong>Tell your participants.</strong> Notify attendees that identity verification is
+            in use before the session, and obtain the consent your jurisdiction requires. Face data
+            is biometric personal information — in Japan it is 個人識別符号 under the APPI.
+          </p>
+        </div>
+      </section>
+
+      <section id="remove">
+        <h2>Removing the app</h2>
+
+        <h3>Option A — disconnect from within Ayonix Zoomer</h3>
+        <ol>
+          <li>Sign in to <a href="https://zoomer.ayonix.com">https://zoomer.ayonix.com</a> as an administrator.</li>
+          <li>Open <strong>設定 (Settings)</strong> → <strong>Zoom連携</strong>.</li>
+          <li>Select <strong>切断 (Disconnect)</strong>.</li>
+        </ol>
+        <p>
+          The stored Zoom access and refresh tokens are deleted immediately and the app stops
+          calling the Zoom API on your behalf.
+        </p>
+
+        <h3>Option B — uninstall from the Zoom App Marketplace</h3>
+        <ol>
+          <li>Sign in to the <a href="https://marketplace.zoom.us/">Zoom App Marketplace</a>.</li>
+          <li>Select <strong>Manage</strong> → <strong>Added Apps</strong>, or search for <strong>Ayonix Zoomer</strong>.</li>
+          <li>Select the app, then select <strong>Remove</strong>.</li>
+          <li>Confirm the removal.</li>
+        </ol>
+
+        <h3>What happens to your data</h3>
+        <ul>
+          <li><strong>Zoom credentials</strong> — deleted as soon as the app is disconnected or removed.</li>
+          <li><strong>Zoom meeting and participant records</strong> already synchronised — retained in your Ayonix Zoomer account, because they form part of your training attendance evidence. They are deleted when you delete your Ayonix Zoomer account.</li>
+          <li><strong>Face templates, monitoring events and evidence images</strong> — these are Ayonix Zoomer data, never sent to Zoom. They are deleted according to the retention period you configure, or on request.</li>
+        </ul>
+        <p>
+          To have all of your data deleted, email
+          <a href="mailto:support@ayonix.com">support@ayonix.com</a> from the account
+          administrator's address. We confirm deletion in writing.
+        </p>
+      </section>
+
+      <section id="data">
+        <h2>Data handling</h2>
+        <table>
+          <thead><tr><th>Data</th><th>How it is handled</th></tr></thead>
+          <tbody>
+            <tr><td>Meeting video and audio</td><td>Never recorded and never stored.</td></tr>
+            <tr><td>Analysed video frames</td><td>Discarded immediately after analysis.</td></tr>
+            <tr><td>Face templates</td><td>Encrypted at rest with AES-256-GCM. Original photographs are not kept. Templates are never sent to a browser.</td></tr>
+            <tr><td>Evidence images</td><td>Off by default. When enabled, encrypted at rest, reachable only through links that expire after 60 seconds, every access written to the audit log, and deleted automatically at the end of the retention period.</td></tr>
+            <tr><td>Zoom OAuth tokens</td><td>Encrypted at rest; deleted on disconnect or uninstall.</td></tr>
+            <tr><td>Storage location</td><td>Cloudflare D1 and R2 in the APAC region.</td></tr>
+          </tbody>
+        </table>
+        <p>
+          Security practices and known limitations are published at
+          <a href="https://github.com/drsadivural/Zoomer/blob/main/SECURITY.md">SECURITY.md</a>.
+          To report a vulnerability, email
+          <a href="mailto:security@ayonix.com">security@ayonix.com</a>.
+        </p>
+      </section>
+
+      <section id="trouble">
+        <h2>Troubleshooting</h2>
+
+        <h3>"Invalid redirect" when connecting</h3>
+        <p>
+          The redirect address registered for the Zoom app does not match the one being requested.
+          Contact support — this is a configuration issue on our side, not something you can fix.
+        </p>
+
+        <h3>The Zoom panel still shows "not connected" after authorising</h3>
+        <p>
+          Authorisation expires if it takes longer than 10 minutes. Select
+          <strong>Zoomアカウントを接続</strong> again and complete it in one go. If the panel reports
+          a specific error, include that message when contacting support.
+        </p>
+
+        <h3>"Create Zoom meeting" fails</h3>
+        <p>
+          The connection was authorised before meeting-creation permission was granted. Disconnect
+          and reconnect the Zoom account to refresh the permissions.
+        </p>
+
+        <h3>Participants are not matched to trainees</h3>
+        <p>
+          Matching uses the email address, then the trainee ID in the display name, then the name.
+          Ask attendees to join with the email registered for the course, or match them manually in
+          the live console.
+        </p>
+      </section>
+
+      <section id="support">
+        <h2>Support</h2>
+        <ul>
+          <li>Support: <a href="mailto:support@ayonix.com">support@ayonix.com</a></li>
+          <li>Security reports: <a href="mailto:security@ayonix.com">security@ayonix.com</a></li>
+          <li>Sales and account enquiries: <a href="mailto:sales@ayonix.com">sales@ayonix.com</a></li>
+        </ul>
+        <p>We aim to respond to support requests within one business day (Japan Standard Time).</p>
+      </section>
+
+      <hr />
+
+      <section id="ja" class="ja">
+        <h2>日本語版：アプリの追加・利用・削除</h2>
+
+        <h3>Ayonix Zoomer とは</h3>
+        <p>
+          Ayonix Zoomer は、Zoomで実施するコンプライアンス研修・資格研修などにおいて、
+          <strong>「誰が実際に受講したか」</strong>を証跡として残すための本人確認・受講監視システムです。
+          会議そのものはZoomで行い、本アプリは主催者向けの管理画面として並行して動作します。
+        </p>
+        <p>
+          <strong>録画は行いません。</strong>理解度・集中度・心理状態の判定も行いません。
+          カメラ映像から観測できる事象（顔が映っているか、登録者と一致するか、カメラがオンか等）のみを扱います。
+          自動判定のみで受講不可とすることはなく、必ず管理者が確認します。
+        </p>
+
+        <h3>追加（インストール）方法</h3>
+        <ol>
+          <li><a href="https://zoomer.ayonix.com">https://zoomer.ayonix.com</a> に管理者としてログインします。</li>
+          <li>左メニューの<strong>「設定」</strong>を開きます。</li>
+          <li><strong>「Zoom連携」</strong>の<strong>「Zoomアカウントを接続」</strong>を選択します。</li>
+          <li>Zoomの認可画面で内容を確認し、<strong>「許可」</strong>を選択します。</li>
+          <li>Ayonix Zoomer に戻り、<strong>「接続済み」</strong>と表示されれば完了です。</li>
+        </ol>
+        <p>Zoom App Marketplace のアプリページから <strong>Add</strong> を選択しても、同じ認可フローが実行されます。</p>
+
+        <h3>利用方法</h3>
+        <ol>
+          <li><strong>受講者登録</strong>：受講者を登録し、本人の同意のうえで本人確認用の顔情報を登録します（原画像は保存しません）。</li>
+          <li><strong>研修管理</strong>：研修を作成し、Zoomミーティングを作成または既存の会議と紐付け、受講者を割り当てます。</li>
+          <li><strong>ライブ会議</strong>：Zoomで通常どおり会議を開催し、本アプリで受講状況をリアルタイムに確認します。</li>
+          <li><strong>レポート／イベント／証跡・ログ</strong>：終了後に出席状況を集計し、CSV・JSON・PDFで出力できます。</li>
+        </ol>
+        <div class="note">
+          <p>
+            受講者には、本人確認を実施する旨を事前に通知し、必要な同意を取得してください。
+            顔情報は個人識別符号（個人情報保護法）に該当します。
+          </p>
+        </div>
+
+        <h3>削除（アンインストール）方法</h3>
+        <p><strong>方法A：アプリ内で切断する</strong></p>
+        <ol>
+          <li><a href="https://zoomer.ayonix.com">https://zoomer.ayonix.com</a> に管理者としてログインします。</li>
+          <li><strong>「設定」→「Zoom連携」</strong>を開きます。</li>
+          <li><strong>「切断」</strong>を選択します。保存されているZoomのトークンは即時削除されます。</li>
+        </ol>
+        <p><strong>方法B：Zoom App Marketplace から削除する</strong></p>
+        <ol>
+          <li><a href="https://marketplace.zoom.us/">Zoom App Marketplace</a> にサインインします。</li>
+          <li><strong>Manage → Added Apps</strong> で <strong>Ayonix Zoomer</strong> を選択します。</li>
+          <li><strong>Remove</strong> を選択し、確認します。</li>
+        </ol>
+        <p>
+          削除後、Zoomの認証情報は削除されます。既に同期済みの出席記録等は受講証跡として
+          Ayonix Zoomer 内に保持され、設定した保存期間の経過後、またはご依頼により削除されます。
+          全データの削除をご希望の場合は
+          <a href="mailto:support@ayonix.com">support@ayonix.com</a> までご連絡ください。
+        </p>
+
+        <h3>お問い合わせ</h3>
+        <p>
+          サポート：<a href="mailto:support@ayonix.com">support@ayonix.com</a>／
+          脆弱性報告：<a href="mailto:security@ayonix.com">security@ayonix.com</a>
+        </p>
+      </section>
+    </main>
+
+    <footer>
+      <p>
+        © Ayonix. Zoom is a trademark of Zoom Communications, Inc. Ayonix Zoomer is not
+        affiliated with or endorsed by Zoom Communications, Inc.
+      </p>
+    </footer>
+  </body>
+</html>

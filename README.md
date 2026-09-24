@@ -183,3 +183,5 @@ npm run deploy
 - `docs/TEST_PLAN.md` — テスト・受入計画
 - `docs/OPERATIONS.md` — 運用手順（バックアップ・削除・資格情報ローテーション）
 - `docs/MEETING_INTELLIGENCE.md` — Zoom会議インテリジェンス層（主催者コンソール）
+- `public/docs/zoom/index.html` — Zoom Marketplace審査用の公開ドキュメント（https://zoomer.ayonix.com/docs/zoom/）
+- `SECURITY.md` — セキュリティポリシーと既知の制約（脆弱性報告先を含む）
