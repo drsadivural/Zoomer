@@ -53,9 +53,13 @@ jobs:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
         with:
-          node-version: 22
+          # Must match the toolchain this project is developed and deployed with.
+          # Node 22 ships npm 10, which crashes with "Exit handler never called!"
+          # on this npm 11-generated lockfile — CI diverging from the dev
+          # environment is exactly the failure CI is supposed to prevent.
+          node-version: 24
           cache: npm
-      - run: npm ci
+      - run: npm ci --no-audit --no-fund
 
       # Runtime dependencies are what an attacker can reach, so they gate the
       # build. Dev-only advisories are reported but do not fail: a vulnerable
