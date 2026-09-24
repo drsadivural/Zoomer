@@ -1,0 +1,35 @@
+# Security headers for statically-served assets.
+#
+# Why this file exists: Cloudflare Workers Static Assets answers asset requests
+# *before* the Worker runs (`cf-cache-status: HIT` on `/`), so the header
+# middleware in `worker/index.ts` never sees them. The API had its headers; the
+# HTML document had none, which is what the Zoom Apps OWASP check rejects:
+#
+#   "Any home URL response missing these headers will cause your app to be
+#    blocked from rendering in the Zoom Apps embedded browser."
+#
+# Zoom validates every 200 `text/html` response for Strict-Transport-Security,
+# X-Content-Type-Options, Content-Security-Policy and Referrer-Policy.
+#
+# Keep this in sync with the middleware in `worker/index.ts`, which applies the
+# same policy to anything the Worker serves itself.
+
+/*
+  Strict-Transport-Security: max-age=31536000; includeSubDomains
+  X-Content-Type-Options: nosniff
+  Referrer-Policy: strict-origin-when-cross-origin
+  Permissions-Policy: camera=(self), microphone=(), geolocation=()
+  Cross-Origin-Opener-Policy: same-origin
+  X-DNS-Prefetch-Control: off
+  # CSP notes, because each of these allowances is load-bearing:
+  #   'wasm-unsafe-eval' + blob: — face-api.js and MediaPipe Tasks Vision
+  #     compile WebAssembly and spawn workers from blob URLs. Without these the
+  #     face engine silently fails to initialise.
+  #   blob: in img-/media-src — camera frames and canvas captures.
+  #   'unsafe-inline' in style-src — React and Tailwind set inline style
+  #     attributes; there is no nonce path for those without a custom renderer.
+  #   fonts.googleapis.com / fonts.gstatic.com — the only external origins the
+  #     app talks to. Face models are self-hosted under /models and /mediapipe.
+  #   frame-ancestors allows Zoom rather than X-Frame-Options: DENY, so the app
+  #     can render inside the Zoom client while still refusing every other site.
+  Content-Security-Policy: default-src 'self'; base-uri 'self'; object-src 'none'; form-action 'self'; frame-ancestors 'self' https://*.zoom.us; script-src 'self' 'wasm-unsafe-eval' blob:; worker-src 'self' blob:; child-src 'self' blob:; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src 'self' https://fonts.gstatic.com data:; img-src 'self' data: blob:; media-src 'self' blob:; connect-src 'self' blob: data:; manifest-src 'self'; upgrade-insecure-requests

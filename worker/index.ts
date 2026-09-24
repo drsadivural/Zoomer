@@ -34,15 +34,57 @@ app.use("*", async (c, next) => {
   c.header("X-Request-Id", c.get("requestId"));
 });
 
-/** Baseline security headers. CSP allows the fonts and wasm the face engine needs. */
+/**
+ * Content-Security-Policy for documents this Worker serves.
+ *
+ * Mirrors `public/_headers`, which covers the statically-served assets. Both
+ * copies exist because Cloudflare answers asset requests before the Worker runs,
+ * so neither one alone covers every response — and the Zoom Apps OWASP check
+ * inspects *every* 200 `text/html` response.
+ *
+ * Each allowance is load-bearing: `'wasm-unsafe-eval'` and `blob:` for the
+ * face-api/MediaPipe WebAssembly and their blob workers, `blob:` in img/media
+ * for camera frames, `'unsafe-inline'` styles for React/Tailwind's inline style
+ * attributes, and the two Google Fonts origins — the only external hosts the
+ * app contacts, since the face models are self-hosted.
+ */
+const DOCUMENT_CSP = [
+  "default-src 'self'",
+  "base-uri 'self'",
+  "object-src 'none'",
+  "form-action 'self'",
+  // Zoom renders the Home URL inside its own client, so it is allowed to frame
+  // us; everything else still is not. This replaces X-Frame-Options: DENY for
+  // documents (CSP supersedes it in modern browsers), and API responses keep
+  // the stricter header below.
+  "frame-ancestors 'self' https://*.zoom.us",
+  "script-src 'self' 'wasm-unsafe-eval' blob:",
+  "worker-src 'self' blob:",
+  "child-src 'self' blob:",
+  "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com",
+  "font-src 'self' https://fonts.gstatic.com data:",
+  "img-src 'self' data: blob:",
+  "media-src 'self' blob:",
+  "connect-src 'self' blob: data:",
+  "manifest-src 'self'",
+  "upgrade-insecure-requests",
+].join("; ");
+
+/** An API response is never a document; it needs none of the above. */
+const API_CSP = "default-src 'none'; frame-ancestors 'none'";
+
 app.use("*", async (c, next) => {
   await next();
-  if (c.req.path.startsWith("/api/")) {
+  const isApi = c.req.path.startsWith("/api/");
+  if (isApi) {
     c.header("Cache-Control", "no-store");
+    c.header("Content-Security-Policy", API_CSP);
+    c.header("X-Frame-Options", "DENY");
+  } else {
+    c.header("Content-Security-Policy", DOCUMENT_CSP);
   }
   c.header("X-Content-Type-Options", "nosniff");
   c.header("Referrer-Policy", "strict-origin-when-cross-origin");
-  c.header("X-Frame-Options", "DENY");
   c.header("Permissions-Policy", "camera=(self), microphone=(), geolocation=()");
   c.header("Strict-Transport-Security", "max-age=31536000; includeSubDomains");
 });
