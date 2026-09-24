@@ -11,20 +11,26 @@
  * Auth is a shared bearer secret (BOT_INGEST_TOKEN); the bot is trusted
  * server-to-server, unlike a trainee device.
  */
-import { and, eq, isNull } from "drizzle-orm";
+import { and, desc, eq, isNull } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/d1";
 import { Hono } from "hono";
 import { z } from "zod";
-import { monitoringEvents, sessionParticipants, trainingSessions, trainees } from "../db/schema";
+import {
+  meetingAnalysisSessions, monitoringEvents, sessionParticipants, trainingSessions, trainees,
+} from "../db/schema";
 import { timingSafeEqual } from "../lib/crypto";
 import { badRequest, notFound, serverError, unauthorized } from "../lib/errors";
 import { parseBody } from "../lib/http";
 import { publishToSession } from "../lib/realtime";
 import {
-  checkPlausibility, evaluate, nextStatus, type ParticipantStatus, type ProposedEvent, type Severity,
+  checkPlausibility, evaluate, MAX_CLOCK_SKEW_MS, MAX_EVENT_AGE_MS, nextStatus,
+  type ParticipantStatus, type ProposedEvent, type Severity,
 } from "../lib/rules";
 import { getRules, ruleVersionTag } from "../lib/settings";
+import { getMeetingConfig } from "../services/monitoring/config";
+import { applyObservation, markParticipantLeft } from "../services/monitoring/pipeline";
 import type { Env, Variables } from "../types";
+import { makeAlertRaiser } from "./meetings";
 import { reconcileZoomParticipant } from "./zoom";
 import { storeEvidence, upsertAlert } from "./trainee";
 
@@ -251,6 +257,199 @@ app.post("/ingest", async (c) => {
   }
 
   return c.json({ ok: true, sessionId: session.id, accepted: accepted.length, rejected });
+});
+
+/* ==================================================================== *
+ *  Organizer Intelligence ingestion (additive)
+ *
+ *  `/ingest` above is unchanged and still drives the original trainee-style
+ *  pipeline. `/observe` below carries the richer per-participant analysis the
+ *  organizer console needs — head pose, gaze, camera/mic/speaking, face box —
+ *  and feeds the state reducer, scheduler and event engine.
+ *
+ *  A bot may call either or both: they write to different tables and neither
+ *  depends on the other.
+ * ==================================================================== */
+
+const observationSchema = z.object({
+  zoomUserId: z.string().optional(),
+  zoomUserName: z.string().optional(),
+  zoomParticipantUuid: z.string().optional(),
+  zoomEmail: z.string().email().optional(),
+  traineeId: z.string().optional(),
+
+  observedAt: z.number().int().positive(),
+  faceDetected: z.boolean(),
+  faceCount: z.number().int().min(0).max(64).default(0),
+  detectionConfidence: z.number().min(0).max(1).nullable().optional(),
+  faceBox: z
+    .object({
+      x: z.number().min(-1).max(2),
+      y: z.number().min(-1).max(2),
+      width: z.number().min(0).max(2),
+      height: z.number().min(0).max(2),
+    })
+    .nullable()
+    .optional(),
+  yaw: z.number().min(-180).max(180).nullable().optional(),
+  pitch: z.number().min(-180).max(180).nullable().optional(),
+  roll: z.number().min(-180).max(180).nullable().optional(),
+  gazeHorizontal: z.number().min(-1).max(1).nullable().optional(),
+  gazeVertical: z.number().min(-1).max(1).nullable().optional(),
+
+  identityStatus: z
+    .enum(["VERIFIED", "UNVERIFIED", "MISMATCH", "NO_FACE", "MULTIPLE_FACES", "LOW_CONFIDENCE", "UNKNOWN"])
+    .optional(),
+  identityConfidence: z.number().min(0).max(1).nullable().optional(),
+
+  cameraOn: z.boolean().nullable().optional(),
+  microphoneOn: z.boolean().nullable().optional(),
+  speaking: z.boolean().nullable().optional(),
+
+  /** Optional data: URL JPEG, stored only when snapshots are enabled. */
+  snapshot: z.string().optional(),
+  /** True when the participant has left the meeting. */
+  left: z.boolean().optional(),
+});
+
+const observeSchema = z.object({
+  meetingId: z.string().min(1),
+  botId: z.string().optional(),
+  observations: z.array(observationSchema).min(1).max(200),
+});
+
+app.post("/observe", async (c) => {
+  const startedAt = Date.now();
+  const body = await parseBody(c, observeSchema);
+  const db = drizzle(c.env.DB);
+  const now = Date.now();
+
+  const sessions = await db
+    .select()
+    .from(trainingSessions)
+    .where(and(eq(trainingSessions.zoomMeetingId, body.meetingId), isNull(trainingSessions.deletedAt)))
+    .limit(2);
+  if (!sessions[0]) throw notFound("meetingId に対応する研修が見つかりません");
+  if (sessions.length > 1) throw badRequest("meetingId が複数の研修に紐付いています");
+  const session = sessions[0];
+  const orgId = session.organizationId;
+
+  const config = await getMeetingConfig(c.env.DB, orgId);
+  if (!config.faceMonitoringEnabled) {
+    return c.json({ ok: true, skipped: "face monitoring disabled", accepted: 0 });
+  }
+
+  const run = (
+    await db
+      .select()
+      .from(meetingAnalysisSessions)
+      .where(
+        and(
+          eq(meetingAnalysisSessions.organizationId, orgId),
+          eq(meetingAnalysisSessions.sessionId, session.id),
+        ),
+      )
+      .orderBy(desc(meetingAnalysisSessions.startedAt))
+      .limit(1)
+  )[0];
+
+  const raiseAlert = run ? makeAlertRaiser(c.env, orgId, session.id, run.id) : undefined;
+  const retentionDays = config.snapshotRetentionDays;
+  let accepted = 0;
+  const rejected: { at: number; reason: string }[] = [];
+
+  for (const o of body.observations) {
+    // Same clock-skew guard the trainee pipeline applies: a bot with a wrong
+    // clock must not back-date or pre-date the timeline.
+    if (o.observedAt > now + MAX_CLOCK_SKEW_MS || now - o.observedAt > MAX_EVENT_AGE_MS) {
+      rejected.push({ at: o.observedAt, reason: "時刻が許容範囲外です" });
+      continue;
+    }
+
+    const rec = await reconcileZoomParticipant(c.env, {
+      organizationId: orgId,
+      sessionId: session.id,
+      name: o.zoomUserName,
+      email: o.zoomEmail,
+      participantUuid: o.zoomParticipantUuid,
+      zoomUserId: o.zoomUserId,
+    });
+
+    if (o.left) {
+      await markParticipantLeft(c.env, orgId, session.id, rec.participantId, o.observedAt);
+      accepted++;
+      continue;
+    }
+
+    await applyObservation({
+      env: c.env,
+      organizationId: orgId,
+      sessionId: session.id,
+      participantId: rec.participantId,
+      displayName: o.zoomUserName ?? null,
+      analysisSessionId: run?.id ?? null,
+      config,
+      observation: {
+        observedAt: o.observedAt,
+        faceDetected: o.faceDetected,
+        faceCount: o.faceCount ?? 0,
+        detectionConfidence: o.detectionConfidence ?? null,
+        faceBox: o.faceBox ?? null,
+        pose:
+          o.yaw != null || o.pitch != null
+            ? { yaw: o.yaw ?? 0, pitch: o.pitch ?? 0, roll: o.roll ?? 0 }
+            : null,
+        gazeHorizontal: o.gazeHorizontal ?? null,
+        gazeVertical: o.gazeVertical ?? null,
+        identityStatus: o.identityStatus ?? null,
+        identityConfidence: o.identityConfidence ?? null,
+        identityTraineeId: o.traineeId ?? null,
+        cameraOn: o.cameraOn ?? null,
+        microphoneOn: o.microphoneOn ?? null,
+        speaking: o.speaking ?? null,
+        source: "BOT",
+      },
+      raiseAlert,
+      storeSnapshot: o.snapshot
+        ? async () =>
+            storeEvidence(c.env, {
+              organizationId: orgId,
+              sessionId: session.id,
+              participantId: rec.participantId,
+              dataUrl: o.snapshot!,
+              kind: "ENGAGEMENT_SNAPSHOT",
+              capturedAt: o.observedAt,
+              retentionDays,
+            })
+        : undefined,
+    });
+    accepted++;
+  }
+
+  if (run) {
+    await db
+      .update(meetingAnalysisSessions)
+      .set({ lastHeartbeatAt: now, status: "RUNNING", updatedAt: now })
+      .where(eq(meetingAnalysisSessions.id, run.id));
+  }
+
+  // Structured ingest log (§37). Carries no participant identity: the fields an
+  // operator needs to spot a stalled or overloaded analysis worker, and nothing
+  // that would put a name or a face in the log stream.
+  console.log(
+    JSON.stringify({
+      level: "info",
+      message: "bot observations ingested",
+      sessionId: session.id,
+      analysisSessionId: run?.id ?? null,
+      botId: body.botId ?? null,
+      accepted,
+      rejected: rejected.length,
+      latencyMs: Date.now() - startedAt,
+    }),
+  );
+
+  return c.json({ ok: true, sessionId: session.id, accepted, rejected });
 });
 
 export default app;

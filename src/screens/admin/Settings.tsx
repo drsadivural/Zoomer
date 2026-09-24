@@ -6,6 +6,7 @@ import { Input } from "@/components/ui/input";
 import { Switch } from "@/components/ui/switch";
 import { api, ApiClientError, type MonitoringSettings, type ZoomStatus } from "@/lib/api";
 import { AppCard, CardHead, ErrorNotice, LoadingRows } from "@/components/shell/primitives";
+import { MeetingMonitoringSettingsCard } from "@/components/meeting-monitoring/MeetingMonitoringSettings";
 import { formatDateTime } from "@/lib/format";
 import { useCan } from "@/lib/auth-context";
 
@@ -228,6 +229,9 @@ export function SettingsScreen() {
           </p>
         </div>
       </AppCard>
+
+      {/* Zoom Organizer Intelligence layer — additive section, own version counter. */}
+      <MeetingMonitoringSettingsCard />
     </>
   );
 }

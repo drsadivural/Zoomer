@@ -2,8 +2,8 @@ import { useEffect, useState } from "react";
 import type { ReactNode } from "react";
 import { NavLink, useLocation } from "react-router-dom";
 import {
-  Bell, CalendarDays, FileCheck2, LayoutDashboard, LogOut, Menu, Moon, Settings as SettingsIcon,
-  Sun, UserPlus, Video,
+  Activity, Bell, CalendarDays, FileBarChart2, FileCheck2, LayoutDashboard, LogOut, Menu, Moon,
+  Settings as SettingsIcon, Sun, UserPlus, Users, Video,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import {
@@ -13,9 +13,17 @@ import {
 import { useAuth } from "@/lib/auth-context";
 import { Logo } from "./primitives";
 
-/** Same six destinations, labels and icons as the approved mockup. */
+/**
+ * The original six destinations from the approved mockup, plus the four
+ * organizer-console pages. Nothing was removed or renamed: an operator who
+ * knows the old navigation finds every item exactly where it was.
+ */
 const NAV = [
   { to: "/", label: "ダッシュボード", icon: LayoutDashboard, end: true },
+  { to: "/live", label: "ライブ会議", icon: Activity },
+  { to: "/participants", label: "参加者", icon: Users },
+  { to: "/events", label: "イベント", icon: Bell },
+  { to: "/reports", label: "レポート", icon: FileBarChart2 },
   { to: "/monitor", label: "ライブ監視", icon: Video },
   { to: "/sessions", label: "研修管理", icon: CalendarDays },
   { to: "/enroll", label: "受講者登録", icon: UserPlus },
@@ -25,6 +33,10 @@ const NAV = [
 
 const HEADINGS: { match: (p: string) => boolean; title: string; subtitle: string }[] = [
   { match: (p) => p === "/", title: "ダッシュボード", subtitle: "本日の研修状況と重要イベント" },
+  { match: (p) => p.startsWith("/live"), title: "ライブ会議", subtitle: "Zoom会議の参加者状況をリアルタイムに把握" },
+  { match: (p) => p.startsWith("/participants"), title: "参加者", subtitle: "参加者ごとの観測状態と本人確認" },
+  { match: (p) => p.startsWith("/events"), title: "イベント", subtitle: "検知イベントの発生から解消まで" },
+  { match: (p) => p.startsWith("/reports"), title: "レポート", subtitle: "会議終了後の参加状況サマリーと出力" },
   { match: (p) => p.startsWith("/monitor"), title: "ライブ監視", subtitle: "Zoom研修の受講状況をリアルタイム監視" },
   { match: (p) => p.startsWith("/sessions"), title: "研修管理", subtitle: "研修の作成・参加者割当・Zoom連携" },
   { match: (p) => p.startsWith("/enroll"), title: "受講者登録", subtitle: "本人確認用の顔画像と受講者情報を管理" },

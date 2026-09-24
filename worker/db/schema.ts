@@ -493,3 +493,301 @@ export const webhookDeliveries = sqliteTable(
   },
   (t) => [uniqueIndex("webhook_deliveries_hash_uq").on(t.provider, t.payloadHash)],
 );
+
+/* ==================================================================== *
+ *  Zoom Organizer Intelligence Layer (additive — 2026-09-24)
+ *
+ *  Everything below is new. No table, column or index above was changed:
+ *  the organizer console is a layer over the existing monitoring pipeline,
+ *  not a replacement for it. Observations, engagement state and identity
+ *  history live here; alerts, evidence and audit continue to use the
+ *  original tables so one alert inbox still covers both sources.
+ * ==================================================================== */
+
+/** One analysis run over one training session (start → stop). */
+export const meetingAnalysisSessions = sqliteTable(
+  "meeting_analysis_sessions",
+  {
+    id: text("id").primaryKey(),
+    organizationId: text("organization_id").notNull(),
+    sessionId: text("session_id").notNull(),
+    zoomMeetingId: text("zoom_meeting_id"),
+    /** MOCK | MEETING_SDK | RTMS — which ingestion adapter feeds this run. */
+    adapter: text("adapter").notNull().default("MOCK"),
+    /** STARTING | RUNNING | DEGRADED | STOPPED | FAILED */
+    status: text("status").notNull().default("STARTING"),
+    /** Snapshot of the monitoring config in force, so a later settings change
+     *  cannot retroactively re-grade this run (same rule as ruleSnapshot). */
+    config: text("config", { mode: "json" }).$type<Record<string, number | boolean | string>>(),
+    startedAt: integer("started_at").notNull().default(now),
+    stoppedAt: integer("stopped_at"),
+    startedBy: text("started_by"),
+    /** Liveness of the analysis worker; absence of a heartbeat is a degraded state. */
+    lastHeartbeatAt: integer("last_heartbeat_at"),
+    participantCount: integer("participant_count").notNull().default(0),
+    lastError: text("last_error"),
+    createdAt: integer("created_at").notNull().default(now),
+    updatedAt: integer("updated_at").notNull().default(now),
+  },
+  (t) => [
+    index("mas_org_session_idx").on(t.organizationId, t.sessionId),
+    index("mas_org_status_idx").on(t.organizationId, t.status),
+    index("mas_zoom_meeting_idx").on(t.zoomMeetingId),
+  ],
+);
+
+/**
+ * Live engagement state, one row per session participant.
+ *
+ * Deliberately denormalised: the organizer grid reads this table alone, so a
+ * 200-person meeting costs one indexed query rather than an aggregate over the
+ * observation history.
+ */
+export const participantAnalysisState = sqliteTable(
+  "participant_analysis_state",
+  {
+    /** Same id as `session_participants.id` — a 1:1 extension of that row. */
+    participantId: text("participant_id").primaryKey(),
+    organizationId: text("organization_id").notNull(),
+    sessionId: text("session_id").notNull(),
+    analysisSessionId: text("analysis_session_id"),
+
+    displayName: text("display_name"),
+    joinedAt: integer("joined_at"),
+    leftAt: integer("left_at"),
+
+    cameraOn: integer("camera_on", { mode: "boolean" }).notNull().default(false),
+    microphoneOn: integer("microphone_on", { mode: "boolean" }).notNull().default(false),
+    speaking: integer("speaking", { mode: "boolean" }).notNull().default(false),
+    speakingMs: integer("speaking_ms").notNull().default(0),
+    speakingTurns: integer("speaking_turns").notNull().default(0),
+    lastSpokeAt: integer("last_spoke_at"),
+
+    faceDetected: integer("face_detected", { mode: "boolean" }).notNull().default(false),
+    faceCount: integer("face_count").notNull().default(0),
+    /** Normalised {x,y,width,height} in 0..1, for the dashboard face overlay. */
+    faceBox: text("face_box", { mode: "json" }).$type<Record<string, number>>(),
+
+    /** VERIFIED | UNVERIFIED | MISMATCH | NO_FACE | MULTIPLE_FACES | UNKNOWN */
+    identityStatus: text("identity_status").notNull().default("UNKNOWN"),
+    identityConfidence: real("identity_confidence"),
+    identityTraineeId: text("identity_trainee_id"),
+    identityVerifiedAt: integer("identity_verified_at"),
+    /** Verification is cached until here, then re-run (see identity service). */
+    identityExpiresAt: integer("identity_expires_at"),
+
+    headYaw: real("head_yaw"),
+    headPitch: real("head_pitch"),
+    headRoll: real("head_roll"),
+    /** FORWARD | LEFT | RIGHT | UP | DOWN | UNKNOWN */
+    headState: text("head_state").notNull().default("UNKNOWN"),
+
+    screenFacingProbability: real("screen_facing_probability"),
+    gazeHorizontal: real("gaze_horizontal"),
+    gazeVertical: real("gaze_vertical"),
+
+    /** Observable engagement signal — never a psychological label. */
+    currentState: text("current_state").notNull().default("UNKNOWN"),
+    currentStateSince: integer("current_state_since").notNull().default(now),
+    /** Candidate state awaiting temporal persistence before it is committed. */
+    pendingState: text("pending_state"),
+    pendingStateSince: integer("pending_state_since"),
+
+    lastAnalyzedAt: integer("last_analyzed_at"),
+    analysisConfidence: real("analysis_confidence"),
+    /** HOT | WARM | NORMAL — scheduler tier. */
+    analysisTier: text("analysis_tier").notNull().default("NORMAL"),
+    nextAnalysisAt: integer("next_analysis_at"),
+
+    /** Points at an `evidence_objects` row of kind THUMBNAIL (retention applies). */
+    thumbnailEvidenceId: text("thumbnail_evidence_id"),
+    thumbnailAt: integer("thumbnail_at"),
+
+    createdAt: integer("created_at").notNull().default(now),
+    updatedAt: integer("updated_at").notNull().default(now),
+  },
+  (t) => [
+    index("pas_org_session_idx").on(t.organizationId, t.sessionId),
+    index("pas_session_state_idx").on(t.sessionId, t.currentState),
+    index("pas_schedule_idx").on(t.sessionId, t.analysisTier, t.nextAnalysisAt),
+  ],
+);
+
+/** Sampled analysis output. Retained for the configured window, then purged. */
+export const participantObservations = sqliteTable(
+  "participant_observations",
+  {
+    id: text("id").primaryKey(),
+    organizationId: text("organization_id").notNull(),
+    sessionId: text("session_id").notNull(),
+    participantId: text("participant_id").notNull(),
+    observedAt: integer("observed_at").notNull(),
+
+    faceDetected: integer("face_detected", { mode: "boolean" }).notNull().default(false),
+    faceCount: integer("face_count").notNull().default(0),
+    identityStatus: text("identity_status"),
+    recognitionConfidence: real("recognition_confidence"),
+
+    headYaw: real("head_yaw"),
+    headPitch: real("head_pitch"),
+    headRoll: real("head_roll"),
+    screenFacingProbability: real("screen_facing_probability"),
+
+    cameraOn: integer("camera_on", { mode: "boolean" }),
+    microphoneOn: integer("microphone_on", { mode: "boolean" }),
+    speaking: integer("speaking", { mode: "boolean" }),
+
+    state: text("state").notNull().default("UNKNOWN"),
+    confidence: real("confidence"),
+    source: text("source").notNull().default("BOT"),
+    expiresAt: integer("expires_at").notNull(),
+  },
+  (t) => [
+    index("obs_session_time_idx").on(t.sessionId, t.observedAt),
+    index("obs_participant_time_idx").on(t.participantId, t.observedAt),
+    index("obs_expiry_idx").on(t.expiresAt),
+  ],
+);
+
+/**
+ * Engagement events with explicit open/close, so "screen away for 40s" is one
+ * row that resolves rather than 40 repeated notifications.
+ */
+export const participantEngagementEvents = sqliteTable(
+  "participant_engagement_events",
+  {
+    id: text("id").primaryKey(),
+    organizationId: text("organization_id").notNull(),
+    sessionId: text("session_id").notNull(),
+    participantId: text("participant_id").notNull(),
+    /** FACE_MISSING | SCREEN_AWAY | CAMERA_OFF | MULTIPLE_FACES | IDENTITY_MISMATCH |
+     *  LONG_ABSENCE | LOW_CONFIDENCE | PARTICIPANT_JOINED | PARTICIPANT_LEFT |
+     *  IDENTITY_VERIFIED | FACE_RETURNED | SCREEN_FACING_RETURNED | CAMERA_ON */
+    type: text("type").notNull(),
+    severity: text("severity").notNull().default("INFO"),
+    /** OPEN | RESOLVED */
+    state: text("state").notNull().default("OPEN"),
+    startedAt: integer("started_at").notNull(),
+    resolvedAt: integer("resolved_at"),
+    durationMs: integer("duration_ms"),
+    confidence: real("confidence"),
+    detail: text("detail"),
+    /** Suppresses duplicates for one ongoing condition (unique while OPEN). */
+    dedupeKey: text("dedupe_key").notNull(),
+    occurrences: integer("occurrences").notNull().default(1),
+    evidenceId: text("evidence_id"),
+    /** Set when this event was escalated into the existing alert inbox. */
+    alertId: text("alert_id"),
+    escalated: integer("escalated", { mode: "boolean" }).notNull().default(false),
+    expiresAt: integer("expires_at"),
+    createdAt: integer("created_at").notNull().default(now),
+    updatedAt: integer("updated_at").notNull().default(now),
+  },
+  (t) => [
+    index("pee_session_time_idx").on(t.sessionId, t.startedAt),
+    index("pee_participant_idx").on(t.participantId, t.startedAt),
+    index("pee_org_state_idx").on(t.organizationId, t.state),
+    uniqueIndex("pee_open_dedupe_uq").on(t.participantId, t.dedupeKey, t.startedAt),
+  ],
+);
+
+/** Audit trail of every identity decision, including the ones that failed. */
+export const identityVerifications = sqliteTable(
+  "identity_verifications",
+  {
+    id: text("id").primaryKey(),
+    organizationId: text("organization_id").notNull(),
+    sessionId: text("session_id").notNull(),
+    participantId: text("participant_id").notNull(),
+    traineeId: text("trainee_id"),
+    /** VERIFIED | UNVERIFIED | MISMATCH | NO_FACE | MULTIPLE_FACES | LOW_CONFIDENCE | UNKNOWN */
+    result: text("result").notNull(),
+    confidence: real("confidence"),
+    threshold: real("threshold"),
+    engine: text("engine"),
+    modelVersion: text("model_version"),
+    /** BOT | BROWSER | SIMULATION | MANUAL */
+    source: text("source").notNull().default("BOT"),
+    /** JOIN | RETURN | PERIODIC | FACE_CHANGE | MANUAL — why we re-verified. */
+    trigger: text("trigger").notNull().default("PERIODIC"),
+    reason: text("reason"),
+    evidenceId: text("evidence_id"),
+    verifiedAt: integer("verified_at").notNull(),
+    expiresAt: integer("expires_at"),
+  },
+  (t) => [
+    index("idv_session_time_idx").on(t.sessionId, t.verifiedAt),
+    index("idv_participant_idx").on(t.participantId, t.verifiedAt),
+  ],
+);
+
+/**
+ * Organizer-facing monitoring configuration. A separate table from
+ * `monitoring_settings` on purpose: the original trainee-side rules keep their
+ * own version counter and review history, untouched by this layer.
+ */
+export const meetingMonitoringSettings = sqliteTable("meeting_monitoring_settings", {
+  organizationId: text("organization_id").primaryKey(),
+  version: integer("version").notNull().default(1),
+
+  faceMonitoringEnabled: integer("face_monitoring_enabled", { mode: "boolean" }).notNull().default(true),
+  identityVerificationEnabled: integer("identity_verification_enabled", { mode: "boolean" }).notNull().default(true),
+  screenFacingEnabled: integer("screen_facing_enabled", { mode: "boolean" }).notNull().default(true),
+  headPoseEnabled: integer("head_pose_enabled", { mode: "boolean" }).notNull().default(true),
+  multiFaceEnabled: integer("multi_face_enabled", { mode: "boolean" }).notNull().default(true),
+  participationAnalyticsEnabled: integer("participation_analytics_enabled", { mode: "boolean" }).notNull().default(true),
+  transcriptEnabled: integer("transcript_enabled", { mode: "boolean" }).notNull().default(false),
+
+  normalFps: real("normal_fps").notNull().default(2),
+  elevatedFps: real("elevated_fps").notNull().default(5),
+  normalIntervalSec: integer("normal_interval_sec").notNull().default(10),
+  warmIntervalSec: integer("warm_interval_sec").notNull().default(3),
+  hotIntervalSec: integer("hot_interval_sec").notNull().default(1),
+
+  /** Temporal persistence before a signal is believed (§12). */
+  transientSec: integer("transient_sec").notNull().default(3),
+  temporarySec: integer("temporary_sec").notNull().default(10),
+  prolongedSec: integer("prolonged_sec").notNull().default(30),
+
+  faceMissingSec: integer("face_missing_sec").notNull().default(30),
+  screenAwaySec: integer("screen_away_sec").notNull().default(30),
+  cameraOffSec: integer("camera_off_sec").notNull().default(60),
+  multiFaceSec: integer("multi_face_sec").notNull().default(5),
+  longAbsenceSec: integer("long_absence_sec").notNull().default(300),
+
+  identityConfidenceThreshold: real("identity_confidence_threshold").notNull().default(0.82),
+  identityCacheSec: integer("identity_cache_sec").notNull().default(600),
+  screenFacingThreshold: real("screen_facing_threshold").notNull().default(0.6),
+  lowConfidenceThreshold: real("low_confidence_threshold").notNull().default(0.4),
+
+  yawThresholdDeg: real("yaw_threshold_deg").notNull().default(25),
+  pitchUpThresholdDeg: real("pitch_up_threshold_deg").notNull().default(18),
+  pitchDownThresholdDeg: real("pitch_down_threshold_deg").notNull().default(22),
+
+  snapshotsEnabled: integer("snapshots_enabled", { mode: "boolean" }).notNull().default(false),
+  snapshotRetentionDays: integer("snapshot_retention_days").notNull().default(7),
+  observationRetentionDays: integer("observation_retention_days").notNull().default(14),
+  eventRetentionDays: integer("event_retention_days").notNull().default(90),
+  transcriptRetentionDays: integer("transcript_retention_days").notNull().default(30),
+
+  alertNotificationsEnabled: integer("alert_notifications_enabled", { mode: "boolean" }).notNull().default(true),
+
+  updatedAt: integer("updated_at").notNull().default(now),
+  updatedBy: text("updated_by"),
+});
+
+/** Frozen end-of-meeting analytics, so a report survives observation purging. */
+export const meetingReports = sqliteTable(
+  "meeting_reports",
+  {
+    id: text("id").primaryKey(),
+    organizationId: text("organization_id").notNull(),
+    sessionId: text("session_id").notNull(),
+    analysisSessionId: text("analysis_session_id"),
+    summary: text("summary", { mode: "json" }).$type<Record<string, unknown>>().notNull(),
+    participants: text("participants", { mode: "json" }).$type<Record<string, unknown>[]>().notNull(),
+    generatedAt: integer("generated_at").notNull().default(now),
+    generatedBy: text("generated_by"),
+  },
+  (t) => [index("mr_org_session_idx").on(t.organizationId, t.sessionId, t.generatedAt)],
+);

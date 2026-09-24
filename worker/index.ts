@@ -1,7 +1,7 @@
 import { and, eq, isNull, lte } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/d1";
 import { Hono } from "hono";
-import { evidenceObjects } from "./db/schema";
+import { evidenceObjects, participantEngagementEvents, participantObservations } from "./db/schema";
 import { recordAudit } from "./lib/audit";
 import { ApiError } from "./lib/errors";
 import { errorResponse } from "./lib/http";
@@ -11,6 +11,7 @@ import authRoutes from "./routes/auth";
 import dashboardRoutes from "./routes/dashboard";
 import evidenceRoutes from "./routes/evidence";
 import monitorRoutes from "./routes/monitor";
+import meetingsRoutes from "./routes/meetings";
 import botRoutes from "./routes/bot";
 import reportsRoutes from "./routes/reports";
 import sessionsRoutes from "./routes/sessions";
@@ -74,6 +75,8 @@ app.route("/api/v1/reports", reportsRoutes);
 app.route("/api/v1/settings", settingsRoutes);
 app.route("/api/v1/audit", auditRoutes);
 app.route("/api/v1/monitor", monitorRoutes);
+/** Zoom Organizer Intelligence layer (additive; the routes above are unchanged). */
+app.route("/api/v1/meetings", meetingsRoutes);
 app.route("/api/v1/bot", botRoutes);
 app.route("/api/v1/trainee", traineeRoutes);
 app.route("/api/v1/integrations/zoom", zoomRoutes);
@@ -162,6 +165,37 @@ async function purgeExpiredEvidence(env: Env): Promise<number> {
   return purged;
 }
 
+/**
+ * Retention for the organizer-intelligence tables (§41).
+ *
+ * Observations and engagement events carry their own `expires_at`, computed
+ * from the organization's retention settings when they were written — so
+ * shortening a retention window applies to new data without retroactively
+ * re-dating what is already stored. Meeting reports are deliberately NOT
+ * purged: they are the summarised record that outlives the raw samples.
+ */
+async function purgeExpiredAnalytics(env: Env): Promise<{ observations: number; events: number }> {
+  const db = drizzle(env.DB);
+  const now = Date.now();
+
+  const observations = await db
+    .delete(participantObservations)
+    .where(lte(participantObservations.expiresAt, now));
+  const events = await db
+    .delete(participantEngagementEvents)
+    .where(
+      and(
+        lte(participantEngagementEvents.expiresAt, now),
+        eq(participantEngagementEvents.state, "RESOLVED"),
+      ),
+    );
+
+  return {
+    observations: observations.meta.changes ?? 0,
+    events: events.meta.changes ?? 0,
+  };
+}
+
 export default {
   fetch: app.fetch,
   async scheduled(_event: ScheduledController, env: Env, ctx: ExecutionContext) {
@@ -169,6 +203,23 @@ export default {
       purgeExpiredEvidence(env).then((n) => {
         if (n > 0) console.log(JSON.stringify({ level: "info", message: "evidence purged", count: n }));
       }),
+    );
+    ctx.waitUntil(
+      purgeExpiredAnalytics(env)
+        .then((r) => {
+          if (r.observations || r.events) {
+            console.log(JSON.stringify({ level: "info", message: "analytics purged", ...r }));
+          }
+        })
+        .catch((err) =>
+          console.error(
+            JSON.stringify({
+              level: "error",
+              message: "analytics purge failed",
+              error: err instanceof Error ? err.message : "unknown",
+            }),
+          ),
+        ),
     );
   },
 } satisfies ExportedHandler<Env>;
