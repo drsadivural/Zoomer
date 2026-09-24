@@ -49,6 +49,12 @@ export const PREFIXES = {
   report: "rep",
   idempotency: "idm",
   webhook: "whk",
+  /* Zoom Organizer Intelligence layer (additive). */
+  analysisSession: "mas",
+  observation: "obs",
+  engagementEvent: "eng",
+  identityCheck: "idv",
+  meetingReport: "mrp",
 } as const;
 
 export function newId(kind: keyof typeof PREFIXES, now?: number): string {

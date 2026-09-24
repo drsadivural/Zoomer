@@ -173,6 +173,50 @@ export const api = {
       "/integrations/zoom/sync-participants",
       { method: "POST", body: { sessionId } },
     ),
+
+  /* ------------------------------------------ Zoom Organizer Intelligence */
+
+  meetingAnalysis: (id: string) => request<MeetingAnalysisResponse>(`/meetings/${id}/analysis`),
+  startAnalysis: (id: string, body: StartAnalysisRequest = {}) =>
+    request<{ analysis: AnalysisRun; alreadyRunning?: boolean }>(`/meetings/${id}/analysis/start`, {
+      method: "POST",
+      body,
+    }),
+  stopAnalysis: (id: string) =>
+    request<{ ok: boolean }>(`/meetings/${id}/analysis/stop`, { method: "POST" }),
+  analysisPlan: (id: string, limit = 25) =>
+    request<{ plan: SchedulePlanEntry[]; generatedAt: number }>(`/meetings/${id}/analysis/plan`, {
+      query: { limit },
+    }),
+  meetingParticipants: (id: string, query: Record<string, string | number | undefined> = {}) =>
+    request<{ participants: MeetingParticipant[]; total: number; serverTime: number }>(
+      `/meetings/${id}/participants`,
+      { query },
+    ),
+  meetingParticipant: (id: string, participantId: string, since?: number) =>
+    request<MeetingParticipantDetail>(`/meetings/${id}/participants/${participantId}`, {
+      query: { since },
+    }),
+  meetingEvents: (id: string, query: Record<string, string | number | undefined> = {}) =>
+    request<{ events: EngagementEvent[]; serverTime: number }>(`/meetings/${id}/events`, { query }),
+  meetingReport: (id: string) => request<MeetingReportResponse>(`/meetings/${id}/report`),
+  saveMeetingReport: (id: string) =>
+    request<{ report: MeetingReportResponse & { id: string } }>(`/meetings/${id}/report`, {
+      method: "POST",
+    }),
+  meetingReportCsvUrl: (id: string) => `${BASE}/meetings/${id}/report?format=csv`,
+  getMeetingSettings: () =>
+    request<{ settings: MeetingMonitoringConfig }>("/meetings/monitoring-settings"),
+  saveMeetingSettings: (patch: Partial<MeetingMonitoringConfig>) =>
+    request<{ settings: MeetingMonitoringConfig }>("/meetings/monitoring-settings", {
+      method: "PATCH",
+      body: patch,
+    }),
+  simulateMeeting: (id: string, body: { ticks?: number; stepSec?: number; participantCount?: number } = {}) =>
+    request<{ ok: boolean; participants: number; observations: number }>(`/meetings/${id}/simulate`, {
+      method: "POST",
+      body,
+    }),
 };
 
 /* ------------------------------------------------------- trainee client */
@@ -545,4 +589,234 @@ export interface ReauthRequest {
   engine: string;
   modelVersion: string;
   qualityScore: number;
+}
+
+/* ------------------------------- Zoom Organizer Intelligence layer types */
+
+export interface MeetingMonitoringConfig {
+  version: number;
+  faceMonitoringEnabled: boolean;
+  identityVerificationEnabled: boolean;
+  screenFacingEnabled: boolean;
+  headPoseEnabled: boolean;
+  multiFaceEnabled: boolean;
+  participationAnalyticsEnabled: boolean;
+  transcriptEnabled: boolean;
+  normalFps: number;
+  elevatedFps: number;
+  normalIntervalSec: number;
+  warmIntervalSec: number;
+  hotIntervalSec: number;
+  transientSec: number;
+  temporarySec: number;
+  prolongedSec: number;
+  faceMissingSec: number;
+  screenAwaySec: number;
+  cameraOffSec: number;
+  multiFaceSec: number;
+  longAbsenceSec: number;
+  identityConfidenceThreshold: number;
+  identityCacheSec: number;
+  screenFacingThreshold: number;
+  lowConfidenceThreshold: number;
+  yawThresholdDeg: number;
+  pitchUpThresholdDeg: number;
+  pitchDownThresholdDeg: number;
+  snapshotsEnabled: boolean;
+  snapshotRetentionDays: number;
+  observationRetentionDays: number;
+  eventRetentionDays: number;
+  transcriptRetentionDays: number;
+  alertNotificationsEnabled: boolean;
+}
+
+export interface StartAnalysisRequest {
+  adapter?: "MEETING_SDK" | "RTMS" | "MOCK";
+  participantCount?: number;
+  seed?: number;
+}
+
+export interface AnalysisRun {
+  id: string;
+  sessionId: string;
+  zoomMeetingId: string | null;
+  adapter: string;
+  status: string;
+  startedAt: number;
+  stoppedAt?: number | null;
+  lastHeartbeatAt?: number | null;
+  participantCount?: number;
+  stale?: boolean;
+}
+
+export interface MeetingKpis {
+  participants: number;
+  present: number;
+  cameraOn: number;
+  screenFacing: number;
+  lookingAway: number;
+  unverified: number;
+  needsAttention: number;
+  speaking: number;
+  alerts: number;
+}
+
+export interface MeetingAnalysisResponse {
+  session: {
+    id: string;
+    title: string;
+    status: string;
+    startsAt: number;
+    endsAt: number;
+    zoomMeetingId: string | null;
+  };
+  analysis: AnalysisRun | null;
+  config: MeetingMonitoringConfig;
+  kpis: MeetingKpis;
+  serverTime: number;
+}
+
+export interface FaceBox {
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+}
+
+export interface MeetingParticipant {
+  participantId: string;
+  sessionId: string;
+  displayName: string | null;
+  joinedAt: number | null;
+  leftAt: number | null;
+  cameraOn: boolean;
+  microphoneOn: boolean;
+  speaking: boolean;
+  speakingMs: number;
+  speakingTurns: number;
+  faceDetected: boolean;
+  faceCount: number;
+  faceBox: FaceBox | null;
+  identityStatus: string;
+  identityConfidence: number | null;
+  headYaw: number | null;
+  headPitch: number | null;
+  headRoll: number | null;
+  headState: string;
+  screenFacingProbability: number | null;
+  currentState: string;
+  currentStateSince: number;
+  lastAnalyzedAt: number | null;
+  analysisConfidence: number | null;
+  analysisTier: string;
+  thumbnailEvidenceId: string | null;
+  thumbnailAt: number | null;
+  traineeName: string | null;
+  externalId: string | null;
+  department: string | null;
+  participantStatus: string | null;
+}
+
+export interface EngagementEvent {
+  id: string;
+  participantId: string;
+  type: string;
+  severity: string;
+  state: string;
+  startedAt: number;
+  resolvedAt: number | null;
+  durationMs: number | null;
+  confidence: number | null;
+  detail: string | null;
+  evidenceId: string | null;
+  alertId: string | null;
+  occurrences: number;
+  displayName: string | null;
+  traineeName: string | null;
+  externalId: string | null;
+}
+
+export interface IdentityVerification {
+  id: string;
+  result: string;
+  confidence: number | null;
+  threshold: number | null;
+  source: string;
+  trigger: string;
+  reason: string | null;
+  verifiedAt: number;
+}
+
+export interface TimelinePoint {
+  observedAt: number;
+  state: string;
+  faceDetected: boolean;
+  faceCount: number;
+  cameraOn: boolean | null;
+  speaking: boolean | null;
+  screenFacingProbability: number | null;
+  headYaw: number | null;
+  headPitch: number | null;
+  confidence: number | null;
+}
+
+export interface MeetingParticipantDetail {
+  participant: MeetingParticipant & { analysisSessionId: string | null };
+  events: EngagementEvent[];
+  identityHistory: IdentityVerification[];
+  timeline: TimelinePoint[];
+  serverTime: number;
+}
+
+export interface SchedulePlanEntry {
+  participantId: string;
+  tier: string;
+  priority: number;
+  intervalSec: number;
+  fps: number;
+  dueAt: number;
+  overdueMs: number;
+  reason: string;
+}
+
+export interface MeetingReportParticipant {
+  participantId: string;
+  name: string;
+  externalId: string | null;
+  joinedAt: number | null;
+  leftAt: number | null;
+  presenceMs: number;
+  samples: number;
+  faceVisiblePct: number;
+  screenFacingPct: number;
+  cameraOnPct: number;
+  speakingMs: number;
+  speakingTurns: number;
+  identityStatus: string;
+  eventCount: number;
+  longestAwayMs: number;
+}
+
+export interface MeetingReportResponse {
+  session?: { id: string; title: string };
+  summary: {
+    sessionId: string;
+    generatedAt: number;
+    durationMs: number;
+    participantCount: number;
+    averagePresenceMs: number;
+    cameraOnPct: number;
+    screenFacingPct: number;
+    faceVisiblePct: number;
+    identityVerifiedPct: number;
+    multipleFaceEvents: number;
+    faceMissingEvents: number;
+    identityMismatchEvents: number;
+    cameraOffMs: number;
+    speakingParticipants: number;
+    totalSpeakingMs: number;
+    totalSamples: number;
+    basis: string;
+  };
+  participants: MeetingReportParticipant[];
 }

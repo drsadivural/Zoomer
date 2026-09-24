@@ -1,6 +1,7 @@
 import { createContext, useCallback, useContext, useEffect, useMemo, useState } from "react";
 import type { ReactNode } from "react";
 import { api, ApiClientError, type CurrentUser } from "./api";
+import { uiCan } from "./permissions";
 
 interface AuthState {
   user: CurrentUser | null;
@@ -61,29 +62,12 @@ export function useAuth(): AuthState {
   return ctx;
 }
 
-/** Mirrors worker/lib/auth.ts so the UI hides what the API would refuse. */
-const PERMISSIONS: Record<CurrentUser["role"], string[]> = {
-  sys_admin: [
-    "org:manage", "user:manage", "settings:read", "settings:write", "integration:manage",
-    "trainee:write", "trainee:read", "enrollment:write", "enrollment:read",
-    "session:write", "session:read", "alert:write", "alert:read",
-    "evidence:view", "evidence:export", "audit:read", "report:create",
-  ],
-  training_admin: [
-    "trainee:write", "trainee:read", "enrollment:write", "enrollment:read",
-    "session:write", "session:read", "alert:write", "alert:read",
-    "evidence:view", "report:create", "settings:read",
-  ],
-  auditor: [
-    "trainee:read", "enrollment:read", "session:read", "alert:read",
-    "evidence:view", "evidence:export", "audit:read", "report:create", "settings:read",
-  ],
-};
-
+/**
+ * The matrix itself lives in `./permissions`, where a test asserts it matches
+ * the server's. It used to be inline here and drifted the first time a
+ * permission was added server-side.
+ */
 export function useCan(): (permission: string) => boolean {
   const { user } = useAuth();
-  return useCallback(
-    (permission: string) => (user ? PERMISSIONS[user.role].includes(permission) : false),
-    [user],
-  );
+  return useCallback((permission: string) => (user ? uiCan(user.role, permission) : false), [user]);
 }

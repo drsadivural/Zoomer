@@ -13,7 +13,7 @@
 #include <string>
 #include <nlohmann/json.hpp>
 
-using namespace ZOOMSDK;  // TODO(sdk): confirm the SDK namespace macro for 7.1.5
+using namespace ZOOMSDK;
 
 /** Thread-safe queue of ingest event objects, drained by the main loop. */
 struct EventSink {

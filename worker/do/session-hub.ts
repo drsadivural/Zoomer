@@ -17,7 +17,14 @@ export type HubEventType =
   | "alert.created"
   | "alert.updated"
   | "session.metrics.updated"
-  | "participant.disconnected";
+  | "participant.disconnected"
+  /* Zoom Organizer Intelligence layer (additive — existing consumers ignore
+     types they do not recognise, so adding to this union is backwards
+     compatible for dashboards built against the original five). */
+  | "participant.analysis.updated"
+  | "engagement.event.opened"
+  | "engagement.event.resolved"
+  | "analysis.session.changed";
 
 export interface HubEvent {
   cursor: number;

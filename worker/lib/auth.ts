@@ -21,17 +21,32 @@ export const PERMISSIONS = {
     "trainee:write", "trainee:read", "enrollment:write", "enrollment:read",
     "session:write", "session:read", "alert:write", "alert:read",
     "evidence:view", "evidence:export", "audit:read", "report:create",
+    "monitoring:read", "monitoring:write",
   ],
   training_admin: [
     "trainee:write", "trainee:read", "enrollment:write", "enrollment:read",
     "session:write", "session:read", "alert:write", "alert:read",
     "evidence:view", "report:create", "settings:read",
+    "monitoring:read", "monitoring:write",
   ],
   auditor: [
     "trainee:read", "enrollment:read", "session:read", "alert:read",
     "evidence:view", "evidence:export", "audit:read", "report:create", "settings:read",
+    "monitoring:read",
   ],
 } as const satisfies Record<Role, readonly string[]>;
+
+/**
+ * Organizer-role vocabulary from the Zoom Organizer Intelligence spec, mapped
+ * onto the roles this product already has rather than introducing a parallel
+ * RBAC system (§32). `monitoring:write` is what "may run a live meeting
+ * monitoring session" means in practice.
+ */
+export const ORGANIZER_ROLE_ALIASES = {
+  ADMIN: "sys_admin",
+  ORGANIZER: "training_admin",
+  VIEWER: "auditor",
+} as const satisfies Record<string, Role>;
 
 export type Permission = (typeof PERMISSIONS)[Role][number];
 

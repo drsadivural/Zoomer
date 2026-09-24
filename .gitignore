@@ -25,3 +25,16 @@ coverage/
 
 # os
 .DS_Store
+
+# tsc must never emit next to the sources: Vite resolves `@/x` to a stale x.js
+# before x.tsx, so an accidental emit silently serves old code in dev.
+src/**/*.js
+src/**/*.d.ts
+worker/**/*.js
+worker/**/*.d.ts
+tests/**/*.js
+tests/**/*.d.ts
+/vite.config.js
+/vitest.config.js
+/drizzle.config.js
+*.tsbuildinfo
