@@ -115,8 +115,11 @@ export class MonitoringLoop {
     document.addEventListener("visibilitychange", this.onVisibility);
     window.addEventListener("online", this.onOnline);
     window.addEventListener("offline", this.onOffline);
-    this.video.srcObject instanceof MediaStream &&
-      this.video.srcObject.getVideoTracks().forEach((t) => t.addEventListener("ended", this.onTrackEnded));
+    if (this.video.srcObject instanceof MediaStream) {
+      this.video.srcObject
+        .getVideoTracks()
+        .forEach((t) => t.addEventListener("ended", this.onTrackEnded));
+    }
 
     // ~4 fps: enough to time conditions to the second without pinning the CPU
     // for eight hours of training.

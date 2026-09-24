@@ -1,0 +1,84 @@
+# Security scanning: SAST, dependency review and secret detection.
+#
+# Split from ci.yml because these have different failure semantics. CI failing
+# means "this change is broken"; a scheduled security run failing usually means
+# "the world changed" — a new advisory against a dependency nobody touched.
+# Mixing them trains people to ignore red builds.
+name: Security
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  schedule:
+    # Weekly, so a newly-published advisory surfaces without anyone pushing.
+    - cron: "17 3 * * 1"
+  workflow_dispatch:
+
+concurrency:
+  group: security-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  codeql:
+    name: CodeQL (SAST)
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    permissions:
+      contents: read
+      security-events: write
+      actions: read
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: github/codeql-action/init@v3
+        with:
+          languages: javascript-typescript
+          # security-extended adds the rules that matter for this product:
+          # injection, unsafe deserialization, weak crypto, sensitive logging.
+          queries: security-extended
+
+      - uses: github/codeql-action/analyze@v3
+        with:
+          category: /language:javascript-typescript
+
+  dependencies:
+    name: Dependency audit (SCA)
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+
+      # Runtime dependencies are what an attacker can reach, so they gate the
+      # build. Dev-only advisories are reported but do not fail: a vulnerable
+      # test runner is worth fixing, not worth blocking a security patch over.
+      - name: Audit runtime dependencies (fails on high/critical)
+        run: npm audit --omit=dev --audit-level=high
+
+      - name: Audit all dependencies (report only)
+        if: always()
+        run: npm audit || true
+
+  secrets:
+    name: Secret scanning
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          # Full history: a credential removed in a later commit is still a
+          # leaked credential, and this project has handled real Zoom secrets.
+          fetch-depth: 0
+
+      - name: gitleaks
+        uses: gitleaks/gitleaks-action@v2
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

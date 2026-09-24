@@ -159,7 +159,7 @@ describe("temporal persistence", () => {
   });
 
   it("commits CAMERA_OFF immediately — it is a Zoom fact, not an inference", () => {
-    let state = emptyParticipantState("sp_1", "ses_1", T0);
+    const state = emptyParticipantState("sp_1", "ses_1", T0);
     state.currentState = "SCREEN_FACING";
     state.currentStateSince = T0;
 
@@ -174,7 +174,7 @@ describe("temporal persistence", () => {
   });
 
   it("commits an identity mismatch immediately", () => {
-    let state = emptyParticipantState("sp_1", "ses_1", T0);
+    const state = emptyParticipantState("sp_1", "ses_1", T0);
     state.currentState = "SCREEN_FACING";
     state.currentStateSince = T0;
 

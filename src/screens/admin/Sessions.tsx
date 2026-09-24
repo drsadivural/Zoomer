@@ -407,7 +407,8 @@ function ParticipantsDialog({
                         checked={selected.has(t.id)}
                         onChange={(e) => {
                           const next = new Set(selected);
-                          e.target.checked ? next.add(t.id) : next.delete(t.id);
+                          if (e.target.checked) next.add(t.id);
+                          else next.delete(t.id);
                           setSelected(next);
                         }}
                       />

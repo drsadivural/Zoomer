@@ -58,6 +58,9 @@ import { isLookingAway } from "../services/monitoring/signals";
 import type { Env, Variables } from "../types";
 import { upsertAlert } from "./trainee";
 
+/** Fixed so a simulation run reproduces exactly when replayed. */
+const DEFAULT_SIMULATION_SEED = 20260924;
+
 const app = new Hono<{ Bindings: Env; Variables: Variables }>();
 app.use("*", requireAuth);
 app.use("*", withIdempotency());
@@ -797,13 +800,15 @@ app.post("/:id/simulate", requirePermission("monitoring:write"), async (c) => {
 
   const config = await getMeetingConfig(c.env.DB, actor.organizationId);
   const { MockZoomAdapter } = await import("../integrations/zoom/mock");
-  const seed = body.seed ?? Number((run.config as Record<string, number> | null)?.seed) ?? 20260924;
-  const count =
-    body.participantCount ??
-    Number((run.config as Record<string, number> | null)?.participantCount) ??
-    12;
+  // `Number(x) ?? fallback` never reaches the fallback — Number() returns NaN,
+  // which is not nullish — so an absent stored value produced NaN here and only
+  // survived because the constructor call below happened to coerce it away.
+  const runConfig = (run.config ?? {}) as Record<string, unknown>;
+  const storedNumber = (v: unknown) => (typeof v === "number" && Number.isFinite(v) ? v : undefined);
+  const seed = body.seed ?? storedNumber(runConfig.seed) ?? DEFAULT_SIMULATION_SEED;
+  const count = body.participantCount ?? storedNumber(runConfig.participantCount) ?? 12;
 
-  const adapter = new MockZoomAdapter({ participantCount: count || 12, seed: seed || 20260924 });
+  const adapter = new MockZoomAdapter({ participantCount: count > 0 ? count : 12, seed });
 
   // Map each synthetic attendee onto a real session_participants row, so the
   // simulation exercises the same joins and tenancy checks as production.

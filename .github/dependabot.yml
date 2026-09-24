@@ -1,0 +1,32 @@
+# Dependency updates.
+#
+# Grouped deliberately: a wall of single-package PRs gets ignored, and ignored
+# updates are how a known-vulnerable dependency stays in production. Security
+# patches are kept ungrouped so they arrive on their own and can be merged fast.
+version: 2
+
+updates:
+  - package-ecosystem: npm
+    directory: /
+    schedule:
+      interval: weekly
+      day: monday
+      time: "04:00"
+      timezone: Asia/Tokyo
+    open-pull-requests-limit: 5
+    labels: [dependencies]
+    groups:
+      # Routine minor/patch noise, batched into one reviewable PR.
+      minor-and-patch:
+        applies-to: version-updates
+        update-types: [minor, patch]
+      # Majors are grouped but separate: they need real testing, not a rubber stamp.
+      major:
+        applies-to: version-updates
+        update-types: [major]
+
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: monthly
+    labels: [dependencies, ci]

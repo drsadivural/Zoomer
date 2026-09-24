@@ -1,0 +1,88 @@
+# Continuous integration.
+#
+# Before this existed, the 284-test suite and the typecheck ran only when
+# somebody remembered to run them — which meant "the tests pass" was a statement
+# about one developer's laptop, not about `main`. Everything here is the same
+# set of commands a developer runs locally, so CI can never disagree with them.
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+# A new push to the same branch makes the previous run irrelevant.
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  verify:
+    name: Typecheck, test, build
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Typecheck
+        run: npm run typecheck
+
+      - name: Lint
+        run: npm run lint
+
+      - name: Unit tests
+        run: npm test
+
+      # `npm run build` runs the typecheck again, but building is what proves the
+      # bundle actually assembles — a type-clean app can still fail to build.
+      - name: Build
+        run: npm run build
+
+      - name: Assert the build did not emit into the source tree
+        # Regression guard: the build script used to emit .js next to every .tsx,
+        # and Vite then served those stale files instead of the sources.
+        run: |
+          found=$(find src worker -name '*.js' -o -name '*.d.ts' | head -20)
+          if [ -n "$found" ]; then
+            echo "::error::build emitted compiled files into the source tree:"
+            echo "$found"
+            exit 1
+          fi
+
+  migrations:
+    name: Migrations are additive
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+
+      # Existing customer data is the one thing a bad deploy cannot undo. Any
+      # destructive DDL has to be a deliberate, reviewed exception rather than
+      # something that slips in unnoticed.
+      - name: Reject destructive DDL in new migrations
+        run: |
+          if git diff --name-only origin/main...HEAD 2>/dev/null | grep -q '^migrations/'; then
+            files=$(git diff --name-only origin/main...HEAD | grep '^migrations/.*\.sql$' || true)
+          else
+            files=$(ls migrations/*.sql 2>/dev/null || true)
+          fi
+          status=0
+          for f in $files; do
+            if grep -inE '^\s*(DROP|ALTER\s+TABLE\s+\S+\s+(DROP|RENAME))' "$f"; then
+              echo "::error file=$f::destructive DDL found; migrations must be additive"
+              status=1
+            fi
+          done
+          exit $status
