@@ -21,7 +21,9 @@ function encodeRandom(): string {
   const bytes = new Uint8Array(RANDOM_LEN);
   crypto.getRandomValues(bytes);
   let out = "";
-  for (let i = 0; i < RANDOM_LEN; i++) out += ENCODING[bytes[i] % ENCODING_LEN];
+  // Mask, not modulo: equivalent for a 32-character alphabet over uniform bytes
+  // (256 / 32 = 8 exactly), and it does not read as biased sampling.
+  for (let i = 0; i < RANDOM_LEN; i++) out += ENCODING[bytes[i] & (ENCODING_LEN - 1)];
   return out;
 }
 

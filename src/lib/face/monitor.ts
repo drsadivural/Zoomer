@@ -69,7 +69,12 @@ function eventId(): string {
   const r = crypto.getRandomValues(new Uint8Array(10));
   const chars = "0123456789ABCDEFGHJKMNPQRSTVWXYZ";
   let tail = "";
-  for (const b of r) tail += chars[b % chars.length];
+  // Mask rather than modulo. Both are unbiased here — the alphabet is 32 long
+  // and 256 divides evenly by 32, so each character maps to exactly 8 byte
+  // values — but `% 32` on crypto randomness is a shape static analysis flags
+  // as biased on sight, and arguing with the scanner on every review costs more
+  // than writing the intent plainly.
+  for (const b of r) tail += chars[b & 31];
   return `evt_${t}${tail}`.slice(0, 30);
 }
 
