@@ -98,9 +98,12 @@ jobs:
 
       - name: Scan the full history for secrets
         run: |
+          # gitleaks writes its progress to stderr, so stderr has to be folded
+          # in: without 2>&1 the log file is empty and the guard below cannot
+          # tell a clean scan from one that never ran.
           gitleaks detect --source . --redact -v \
             --report-format sarif --report-path gitleaks.sarif \
-            --log-level info | tee gitleaks.log
+            --log-level info 2>&1 | tee gitleaks.log
           # gitleaks exits non-zero on a finding, which should fail the job.
           exit "${PIPESTATUS[0]}"
 
