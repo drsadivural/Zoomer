@@ -6,11 +6,20 @@
  * captured one. The one thing it cannot have is liveness: a file proves nothing
  * about who was in front of a camera, and the UI says so rather than letting an
  * operator assume otherwise.
+ *
+ * When a photo contains several faces the operator picks one. That is not a
+ * convenience: the quality gate rejects a multi-face frame precisely because it
+ * does not say whose template is being created, and choosing is what resolves
+ * the ambiguity. The chosen face is then re-analysed on its own crop, so every
+ * number that follows is measured on the pixels actually being enrolled.
  */
 import { useCallback, useRef, useState } from "react";
-import { ImagePlus, Loader2, Upload } from "lucide-react";
+import { ImagePlus, Loader2, Upload, Users } from "lucide-react";
 import { Button } from "@/components/ui/button";
-import { analysePhotoFile, descriptorToArray, ENGINE_ID, MODEL_VERSION } from "@/lib/face/engine";
+import {
+  analysePhotoFile, analyseSelectedFace, descriptorToArray, ENGINE_ID, faceThumbnail,
+  MODEL_VERSION, type FaceObservation, type PhotoAnalysis,
+} from "@/lib/face/engine";
 import { isEnrollableImage } from "@/lib/face/photo-enroll";
 import type { CaptureResult } from "@/components/FaceCapture";
 import { percent } from "@/lib/format";
@@ -20,12 +29,18 @@ interface PhotoEnrollProps {
   busy?: boolean;
 }
 
-interface Preview {
-  name: string;
-  image: string;
+/** One detected face the operator can choose. */
+interface FaceChoice {
+  index: number;
+  face: FaceObservation;
+  thumbnail: string;
+}
+
+interface Selection {
+  /** The face the operator picked, ready to enroll. */
   result: CaptureResult;
-  /** Reasons the server's quality gate is expected to reject this photo. */
   warnings: string[];
+  faceCount: number;
 }
 
 /** Mirrors `assessQuality` in worker/lib/faces.ts so the operator is warned
@@ -33,8 +48,8 @@ interface Preview {
 function qualityWarnings(q: CaptureResult["quality"]): string[] {
   const out: string[] = [];
   if (q.faceCount === 0) out.push("顔が検出できません");
-  if (q.faceCount > 1) out.push("複数の顔が写っています");
-  if (q.relativeSize < 0.05) out.push("顔が小さすぎます。顔まわりを切り抜いてください");
+  if (q.faceCount > 1) out.push("切り抜いた範囲に複数の顔が含まれています");
+  if (q.relativeSize < 0.05) out.push("顔が小さすぎます");
   if (Math.abs(q.yaw) > 0.35 || Math.abs(q.pitch) > 0.35) out.push("正面を向いた写真を使ってください");
   if (q.brightness < 0.25) out.push("暗すぎます");
   if (q.brightness > 0.9) out.push("明るすぎます");
@@ -45,48 +60,101 @@ function qualityWarnings(q: CaptureResult["quality"]): string[] {
 
 export function PhotoEnroll({ onCapture, busy = false }: PhotoEnrollProps) {
   const inputRef = useRef<HTMLInputElement>(null);
-  const [preview, setPreview] = useState<Preview | null>(null);
+  const analysisRef = useRef<PhotoAnalysis | null>(null);
+
+  const [fileName, setFileName] = useState<string | null>(null);
+  const [choices, setChoices] = useState<FaceChoice[]>([]);
+  const [chosen, setChosen] = useState<number | null>(null);
+  const [selection, setSelection] = useState<Selection | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [analysing, setAnalysing] = useState(false);
   const [dragging, setDragging] = useState(false);
 
-  const analyse = useCallback(async (file: File) => {
+  const reset = () => {
+    analysisRef.current = null;
+    setChoices([]);
+    setChosen(null);
+    setSelection(null);
+  };
+
+  /** Re-analyses one face's own crop and makes it the pending enrollment. */
+  const select = useCallback(async (index: number) => {
+    const analysis = analysisRef.current;
+    if (!analysis) return;
+    const face = analysis.faces[index];
+    if (!face) return;
+
+    setChosen(index);
+    setSelection(null);
     setError(null);
-    setPreview(null);
-    if (!isEnrollableImage(file)) {
-      setError("JPEG・PNG・WebP の画像を選択してください。");
-      return;
-    }
     setAnalysing(true);
     try {
-      const analysis = await analysePhotoFile(file);
-      if (!analysis.primary?.descriptor) {
-        setError(
-          analysis.faceCount === 0
-            ? "顔を検出できませんでした。顔がはっきり写った写真を使ってください。"
-            : "顔特徴量を抽出できませんでした。別の写真をお試しください。",
-        );
+      const cropped = await analyseSelectedFace(analysis.canvas, face.box);
+      const primary = cropped.primary;
+      if (!primary?.descriptor) {
+        setError("この顔から特徴量を抽出できませんでした。別の顔または写真をお試しください。");
         return;
       }
-      setPreview({
-        name: file.name,
-        image: analysis.preview,
-        warnings: qualityWarnings(analysis.quality),
+      setSelection({
+        faceCount: cropped.faceCount,
+        warnings: qualityWarnings(cropped.quality),
         result: {
-          descriptor: descriptorToArray(analysis.primary.descriptor),
-          quality: analysis.quality,
+          descriptor: descriptorToArray(primary.descriptor),
+          quality: cropped.quality,
           engine: ENGINE_ID,
           modelVersion: MODEL_VERSION,
+          preview: cropped.preview,
           // A file carries no liveness evidence. Reported honestly as absent.
           liveness: { passed: false, blinks: 0, motionScore: 0 },
         },
       });
     } catch (err) {
-      setError(err instanceof Error ? err.message : "画像を解析できませんでした。");
+      setError(err instanceof Error ? err.message : "選択した顔を解析できませんでした。");
     } finally {
       setAnalysing(false);
     }
   }, []);
+
+  const analyse = useCallback(
+    async (file: File) => {
+      setError(null);
+      reset();
+      setFileName(file.name);
+      if (!isEnrollableImage(file)) {
+        setError("JPEG・PNG・WebP の画像を選択してください。");
+        return;
+      }
+      setAnalysing(true);
+      try {
+        const analysis = await analysePhotoFile(file);
+        analysisRef.current = analysis;
+        if (!analysis.faceCount) {
+          setError("顔を検出できませんでした。顔がはっきり写った写真を使ってください。");
+          return;
+        }
+        // Largest first: in a photo taken to enroll someone, that is almost
+        // always the subject, so the common case needs no clicking.
+        const ordered = [...analysis.faces]
+          .map((face, index) => ({ face, index }))
+          .sort((a, b) => b.face.box.width * b.face.box.height - a.face.box.width * a.face.box.height);
+        setChoices(
+          ordered.map(({ face, index }) => ({
+            index,
+            face,
+            thumbnail: faceThumbnail(analysis.canvas, face.box),
+          })),
+        );
+        await select(ordered[0].index);
+      } catch (err) {
+        setError(err instanceof Error ? err.message : "画像を解析できませんでした。");
+      } finally {
+        setAnalysing(false);
+      }
+    },
+    [select],
+  );
+
+  const multiple = choices.length > 1;
 
   return (
     <div className="space-y-3">
@@ -104,23 +172,22 @@ export function PhotoEnroll({ onCapture, busy = false }: PhotoEnrollProps) {
           if (file) void analyse(file);
         }}
       >
-        {analysing ? (
+        {analysing && !selection ? (
           <>
             <Loader2 className="size-7 animate-spin text-cyan-700" />
             <p className="text-sm font-bold text-slate-700">解析中…</p>
           </>
-        ) : preview ? (
+        ) : selection ? (
           <>
             <img
-              src={preview.image}
-              alt=""
-              className="h-36 w-36 rounded-2xl object-cover shadow-sm"
+              src={selection.result.preview}
+              alt="登録する顔"
+              className="size-36 rounded-2xl object-cover shadow-sm"
             />
-            <p className="max-w-full truncate text-sm font-bold text-slate-700">{preview.name}</p>
+            <p className="max-w-full truncate text-sm font-bold text-slate-700">{fileName}</p>
             <p className="text-xs text-slate-500">
-              顔 {preview.result.quality.faceCount}件 ・ 鮮明度{" "}
-              {percent(preview.result.quality.sharpness, 0)} ・ 明るさ{" "}
-              {percent(preview.result.quality.brightness, 0)}
+              鮮明度 {percent(selection.result.quality.sharpness, 0)} ・ 明るさ{" "}
+              {percent(selection.result.quality.brightness, 0)}
             </p>
           </>
         ) : (
@@ -146,17 +213,50 @@ export function PhotoEnroll({ onCapture, busy = false }: PhotoEnrollProps) {
         }}
       />
 
+      {multiple && (
+        <div className="rounded-xl border border-amber-200 bg-amber-50/70 p-3">
+          <div className="mb-2 flex items-center gap-1.5 text-sm font-bold text-amber-900">
+            <Users className="size-4" />
+            {choices.length}人の顔が検出されました。登録する人を選んでください
+          </div>
+          <div
+            className="flex flex-wrap gap-2"
+            role="radiogroup"
+            aria-label="登録する顔を選択"
+          >
+            {choices.map((c) => (
+              <button
+                key={c.index}
+                type="button"
+                role="radio"
+                aria-checked={chosen === c.index}
+                aria-label={`検出された顔 ${c.index + 1}`}
+                disabled={analysing || busy}
+                onClick={() => void select(c.index)}
+                className={`overflow-hidden rounded-xl border-2 transition ${
+                  chosen === c.index
+                    ? "border-cyan-600 ring-2 ring-cyan-300"
+                    : "border-transparent opacity-70 hover:opacity-100"
+                }`}
+              >
+                <img src={c.thumbnail} alt="" className="size-16 object-cover" />
+              </button>
+            ))}
+          </div>
+        </div>
+      )}
+
       {error && (
         <div role="alert" className="rounded-xl border border-rose-200 bg-rose-50 px-3 py-2 text-sm text-rose-700">
           {error}
         </div>
       )}
 
-      {preview && preview.warnings.length > 0 && (
+      {selection && selection.warnings.length > 0 && (
         <div role="alert" className="rounded-xl border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-800">
           <div className="font-semibold">この写真は品質基準を満たさない可能性があります</div>
           <ul className="mt-1 list-inside list-disc">
-            {preview.warnings.map((w) => <li key={w}>{w}</li>)}
+            {selection.warnings.map((w) => <li key={w}>{w}</li>)}
           </ul>
         </div>
       )}
@@ -171,12 +271,12 @@ export function PhotoEnroll({ onCapture, busy = false }: PhotoEnrollProps) {
           画像を選択
         </Button>
         <Button
-          disabled={!preview || analysing || busy}
-          onClick={() => preview && void onCapture(preview.result)}
+          disabled={!selection || analysing || busy}
+          onClick={() => selection && void onCapture(selection.result)}
           className="gap-1.5"
         >
           {busy ? <Loader2 className="size-4 animate-spin" /> : <Upload className="size-4" />}
-          {busy ? "登録中…" : "この画像で登録"}
+          {busy ? "登録中…" : "この顔で登録"}
         </Button>
       </div>
     </div>

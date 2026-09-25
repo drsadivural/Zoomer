@@ -9,8 +9,8 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { Camera, CameraOff, Loader2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import {
-  analyseFrame, EAR_CLOSED_THRESHOLD, EMPTY_QUALITY, ENGINE_ID, largestFace, loadModels,
-  MODEL_VERSION, descriptorToArray, type FrameAnalysis, type QualityMetrics,
+  analyseFrame, EAR_CLOSED_THRESHOLD, EMPTY_QUALITY, ENGINE_ID, faceThumbnail, largestFace,
+  loadModels, MODEL_VERSION, descriptorToArray, type FrameAnalysis, type QualityMetrics,
 } from "@/lib/face/engine";
 import { LivenessDetector, type LivenessResult } from "@/lib/face/liveness";
 
@@ -20,6 +20,12 @@ export interface CaptureResult {
   engine: string;
   modelVersion: string;
   liveness: { passed: boolean; blinks: number; motionScore: number };
+  /**
+   * Square JPEG of the enrolled face, so the operator can confirm who was just
+   * registered. Held in the tab only — it is never uploaded, and the product
+   * stores no original image (see /legal/privacy).
+   */
+  preview?: string;
 }
 
 export type CameraState = "idle" | "loading" | "requesting" | "ready" | "denied" | "error";
@@ -161,6 +167,7 @@ export function FaceCapture({
       }
       await onCapture({
         descriptor: descriptorToArray(primary.descriptor),
+        preview: faceThumbnail(videoRef.current, primary.box),
         quality: result.quality,
         engine: ENGINE_ID,
         modelVersion: MODEL_VERSION,

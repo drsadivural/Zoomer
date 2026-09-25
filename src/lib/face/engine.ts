@@ -461,6 +461,103 @@ export interface PhotoAnalysis extends FrameAnalysis {
   primary: FaceObservation | null;
   /** Small JPEG of the photo, for showing the operator what was enrolled. */
   preview: string;
+  /**
+   * The decoded pixels the analysis ran on.
+   *
+   * Kept so a second face can be selected and re-analysed without decoding the
+   * file again — and so a thumbnail can be cut for confirmation. It lives only
+   * in the tab: nothing here is uploaded, and the product stores no original
+   * image (see /legal/privacy).
+   */
+  canvas: HTMLCanvasElement;
+}
+
+/** Face box padded by `margin` on each side, clamped to the image. */
+function paddedBox(
+  box: { x: number; y: number; width: number; height: number },
+  width: number,
+  height: number,
+  margin: number,
+) {
+  const padX = box.width * margin;
+  const padY = box.height * margin;
+  const x = Math.max(0, box.x - padX);
+  const y = Math.max(0, box.y - padY);
+  return {
+    x,
+    y,
+    width: Math.min(width - x, box.width + padX * 2),
+    height: Math.min(height - y, box.height + padY * 2),
+  };
+}
+
+/**
+ * Square JPEG of one face, for the operator to look at.
+ *
+ * Square because it is shown in a fixed chip, and padded because a face cropped
+ * exactly to its detection box is unrecognisable to a human — the box stops at
+ * the eyebrows and jaw.
+ */
+export function faceThumbnail(
+  source: AnalysableSource,
+  box: { x: number; y: number; width: number; height: number },
+  size = 128,
+  margin = 0.35,
+): string {
+  const { width, height } = sourceSize(source);
+  const padded = paddedBox(box, width, height, margin);
+  // Square off the crop around its own centre so the face is not stretched.
+  const side = Math.max(padded.width, padded.height);
+  const cx = padded.x + padded.width / 2;
+  const cy = padded.y + padded.height / 2;
+  const sx = Math.max(0, Math.min(width - side, cx - side / 2));
+  const sy = Math.max(0, Math.min(height - side, cy - side / 2));
+
+  const canvas = document.createElement("canvas");
+  canvas.width = size;
+  canvas.height = size;
+  const ctx = canvas.getContext("2d");
+  if (!ctx) return "";
+  ctx.drawImage(source, sx, sy, Math.min(side, width), Math.min(side, height), 0, 0, size, size);
+  return canvas.toDataURL("image/jpeg", 0.8);
+}
+
+/**
+ * Re-analyses one chosen face from a photo that contains several.
+ *
+ * The crop is not cosmetic. The enrollment quality gate rejects a frame with
+ * more than one face, and rightly so: a group photo does not say whose template
+ * is being created. Once the operator has pointed at a person, cropping to them
+ * turns the ambiguous photo into an unambiguous one, and every quality number
+ * that follows is then genuinely measured on the pixels being enrolled rather
+ * than asserted by the client. A generous margin is kept because the detector
+ * needs some context around a face to find it at all.
+ */
+export async function analyseSelectedFace(
+  canvas: HTMLCanvasElement,
+  box: { x: number; y: number; width: number; height: number },
+): Promise<PhotoAnalysis> {
+  await loadModels();
+  const padded = paddedBox(box, canvas.width, canvas.height, 0.9);
+
+  const crop = document.createElement("canvas");
+  crop.width = Math.max(1, Math.round(padded.width));
+  crop.height = Math.max(1, Math.round(padded.height));
+  const ctx = crop.getContext("2d");
+  if (!ctx) throw new Error("画像を処理できません");
+  ctx.drawImage(
+    canvas,
+    padded.x, padded.y, padded.width, padded.height,
+    0, 0, crop.width, crop.height,
+  );
+
+  const analysis = await analyseStill(crop);
+  return {
+    ...analysis,
+    primary: largestFace(analysis),
+    preview: faceThumbnail(canvas, box),
+    canvas: crop,
+  };
 }
 
 /**
@@ -473,27 +570,35 @@ export interface PhotoAnalysis extends FrameAnalysis {
 export async function analysePhotoFile(file: Blob): Promise<PhotoAnalysis> {
   await loadModels();
   const { canvas } = await decodeImageFile(file);
+  const analysis = await analyseStill(canvas);
+  return {
+    ...analysis,
+    primary: largestFace(analysis),
+    preview: thumbnailOf(canvas),
+    canvas,
+  };
+}
 
-  // Escalate through STILL_INPUT_SIZES, keeping the most confident result. The
-  // second pass is only paid for when the first is weak, and a weak first pass
-  // is exactly the case that would otherwise be rejected as "occluded".
+/**
+ * Detects on a still, escalating through STILL_INPUT_SIZES and keeping the most
+ * confident result. The second pass is only paid for when the first is weak,
+ * and a weak first pass is exactly the case that would otherwise be rejected as
+ * "occluded".
+ */
+async function analyseStill(canvas: HTMLCanvasElement): Promise<FrameAnalysis> {
   let best: FrameAnalysis | null = null;
-  let bestFace: FaceObservation | null = null;
+  let bestScore = -1;
   for (const inputSize of STILL_INPUT_SIZES) {
     const analysis = await analyseFrame(canvas, { withDescriptor: true, inputSize });
     const face = largestFace(analysis);
-    if (!best || (face?.score ?? 0) > (bestFace?.score ?? 0)) {
+    const score = face?.score ?? 0;
+    if (!best || score > bestScore) {
       best = analysis;
-      bestFace = face;
+      bestScore = score;
     }
     if (face && face.score >= STILL_GOOD_SCORE) break;
   }
-
-  return {
-    ...(best as FrameAnalysis),
-    primary: bestFace,
-    preview: thumbnailOf(canvas),
-  };
+  return best as FrameAnalysis;
 }
 
 /** Small JPEG used only for the operator's own review of a batch. */
