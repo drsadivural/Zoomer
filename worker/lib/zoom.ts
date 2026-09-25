@@ -270,6 +270,34 @@ export async function createMeeting(
   });
 }
 
+export interface ZoomMeetingDetail {
+  id: number | string;
+  uuid?: string;
+  topic?: string;
+  host_id?: string;
+  status?: string;
+  start_time?: string;
+  duration?: number;
+  join_url?: string;
+  password?: string;
+  encrypted_password?: string;
+  h323_password?: string;
+}
+
+/**
+ * Full detail for one meeting, including its passcode.
+ *
+ * The bot needs the passcode to join, and a listing never includes it. Callers
+ * must treat the result as a credential: it is handed to the bot over an
+ * authenticated channel and never persisted.
+ */
+export async function getMeetingDetail(
+  accessToken: string,
+  meetingId: string,
+): Promise<ZoomMeetingDetail> {
+  return zoomApi<ZoomMeetingDetail>(accessToken, `/meetings/${encodeURIComponent(meetingId)}`);
+}
+
 export interface ZoomParticipantRecord {
   id?: string;
   user_id?: string;

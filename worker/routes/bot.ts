@@ -16,9 +16,11 @@ import { drizzle } from "drizzle-orm/d1";
 import { Hono } from "hono";
 import { z } from "zod";
 import {
-  meetingAnalysisSessions, monitoringEvents, sessionParticipants, trainingSessions, trainees,
+  integrations, meetingAnalysisSessions, monitoringEvents, organizations, sessionParticipants,
+  trainingSessions, trainees,
 } from "../db/schema";
 import { timingSafeEqual } from "../lib/crypto";
+import { getAccessToken, getMeetingDetail, listMeetings } from "../lib/zoom";
 import { badRequest, notFound, serverError, unauthorized } from "../lib/errors";
 import { parseBody } from "../lib/http";
 import { publishToSession } from "../lib/realtime";
@@ -28,6 +30,9 @@ import {
 } from "../lib/rules";
 import { getRules, ruleVersionTag } from "../lib/settings";
 import { getMeetingConfig } from "../services/monitoring/config";
+import {
+  ensureSessionForMeeting, resolveOrganizationForMeeting, upsertZoomMeeting,
+} from "../services/zoom/auto-session";
 import { applyObservation, markParticipantLeft } from "../services/monitoring/pipeline";
 import type { Env, Variables } from "../types";
 import { makeAlertRaiser } from "./meetings";
@@ -73,9 +78,59 @@ const eventSchema = z.object({
 
 const ingestSchema = z.object({
   meetingId: z.string().min(1),
+  /** Only consulted when the meeting cannot be attributed any other way. */
+  organizationId: z.string().min(1).optional(),
   botId: z.string().optional(),
   events: z.array(eventSchema).min(1).max(200),
 });
+
+/**
+ * Finds — or creates — the training session a bot payload belongs to.
+ *
+ * The bot can be pointed at a meeting directly (`ZOOM_MEETING_NUMBER`) as well
+ * as driven by `/assignments`, and in the direct case nothing has ever created
+ * a session for that meeting. Returning 404 there would make the bot look
+ * broken when it is working perfectly; instead we resolve the tenant the same
+ * way the webhook does and bind the meeting to a session.
+ */
+async function resolveBotSession(env: Env, meetingId: string, statedOrgId?: string) {
+  const db = drizzle(env.DB);
+  const sessions = await db
+    .select()
+    .from(trainingSessions)
+    .where(and(eq(trainingSessions.zoomMeetingId, meetingId), isNull(trainingSessions.deletedAt)))
+    .limit(2);
+  if (sessions.length > 1) throw badRequest("meetingId が複数の研修に紐付いています");
+  if (sessions[0]) return sessions[0];
+
+  // A bot run from a fixed meeting number has no webhook and no OAuth record to
+  // attribute it by, so it may state its tenant outright. It is a trusted
+  // server-to-server principal, but the id is still checked against a real
+  // organization rather than taken on faith.
+  let organizationId = await resolveOrganizationForMeeting(env, null, meetingId);
+  if (!organizationId && statedOrgId) {
+    const owner = await db
+      .select({ id: organizations.id })
+      .from(organizations)
+      .where(eq(organizations.id, statedOrgId))
+      .limit(1);
+    organizationId = owner[0]?.id ?? null;
+  }
+  if (!organizationId) {
+    throw notFound(
+      "meetingId に対応する研修が見つかりません（テナントを特定できません。organizationId を指定してください）",
+    );
+  }
+  const ensured = await ensureSessionForMeeting(env, organizationId, meetingId);
+  if (!ensured.session) {
+    throw notFound(
+      ensured.reason === "disabled"
+        ? "meetingId に対応する研修がなく、自動作成が無効になっています"
+        : "meetingId に対応する研修が見つかりません",
+    );
+  }
+  return ensured.session;
+}
 
 interface PartState {
   participantId: string;
@@ -90,14 +145,8 @@ app.post("/ingest", async (c) => {
   const db = drizzle(c.env.DB);
   const now = Date.now();
 
-  // Resolve the training session from the Zoom meeting id.
-  const sessions = await db
-    .select()
-    .from(trainingSessions)
-    .where(and(eq(trainingSessions.zoomMeetingId, body.meetingId), isNull(trainingSessions.deletedAt)))
-    .limit(2);
-  if (!sessions[0]) throw notFound("meetingId に対応する研修が見つかりません");
-  if (sessions.length > 1) throw badRequest("meetingId が複数の研修に紐付いています");
+  // Resolve (or create) the training session for this Zoom meeting.
+  const sessions = [await resolveBotSession(c.env, body.meetingId, body.organizationId)];
   const session = sessions[0];
   const orgId = session.organizationId;
 
@@ -271,7 +320,7 @@ app.post("/ingest", async (c) => {
  *  depends on the other.
  * ==================================================================== */
 
-const observationSchema = z.object({
+export const observationSchema = z.object({
   zoomUserId: z.string().optional(),
   zoomUserName: z.string().optional(),
   zoomParticipantUuid: z.string().optional(),
@@ -320,6 +369,8 @@ const observationSchema = z.object({
 
 const observeSchema = z.object({
   meetingId: z.string().min(1),
+  /** Only consulted when the meeting cannot be attributed any other way. */
+  organizationId: z.string().min(1).optional(),
   botId: z.string().optional(),
   observations: z.array(observationSchema).min(1).max(200),
 });
@@ -330,14 +381,7 @@ app.post("/observe", async (c) => {
   const db = drizzle(c.env.DB);
   const now = Date.now();
 
-  const sessions = await db
-    .select()
-    .from(trainingSessions)
-    .where(and(eq(trainingSessions.zoomMeetingId, body.meetingId), isNull(trainingSessions.deletedAt)))
-    .limit(2);
-  if (!sessions[0]) throw notFound("meetingId に対応する研修が見つかりません");
-  if (sessions.length > 1) throw badRequest("meetingId が複数の研修に紐付いています");
-  const session = sessions[0];
+  const session = await resolveBotSession(c.env, body.meetingId, body.organizationId);
   const orgId = session.organizationId;
 
   const config = await getMeetingConfig(c.env.DB, orgId);
@@ -458,6 +502,136 @@ app.post("/observe", async (c) => {
   );
 
   return c.json({ ok: true, sessionId: session.id, accepted, rejected });
+});
+
+/* ------------------------------------------------------- bot assignments */
+
+/**
+ * Tells the bot which meetings to be in.
+ *
+ * The bot cannot be launched by the Worker — Cloudflare has no process to
+ * spawn, and the Meeting SDK needs a real host with a GPU-less but native
+ * runtime. So the relationship is inverted: the bot polls this endpoint and
+ * joins whatever it is told to. That also means the bot needs no Zoom
+ * credentials of its own beyond its SDK key, and no knowledge of which
+ * customers exist.
+ *
+ * "Live" comes from Zoom itself rather than from our webhook state, because a
+ * tenant may not have configured webhooks at all, and because a bot that
+ * restarts must be able to rejoin a meeting that started while it was down.
+ */
+app.get("/assignments", async (c) => {
+  const db = drizzle(c.env.DB);
+  const clientId = c.env.ZOOM_CLIENT_ID;
+  const clientSecret = c.env.ZOOM_CLIENT_SECRET;
+  const encryptionKey = c.env.DATA_ENCRYPTION_KEY;
+  if (!clientId || !clientSecret || !encryptionKey) {
+    throw serverError("Zoom連携が未設定です");
+  }
+
+  const connected = await db
+    .select({ organizationId: integrations.organizationId })
+    .from(integrations)
+    .where(and(eq(integrations.provider, "zoom"), eq(integrations.status, "CONNECTED")));
+
+  const assignments: Record<string, unknown>[] = [];
+  /** Reported rather than thrown: one tenant's expired token must not blind the
+   *  bot to every other tenant's live meetings. */
+  const problems: { organizationId: string; reason: string }[] = [];
+
+  for (const row of connected) {
+    const config = await getMeetingConfig(c.env.DB, row.organizationId);
+    if (!config.botAutoJoinEnabled || !config.faceMonitoringEnabled) continue;
+
+    let token: string;
+    try {
+      token = await getAccessToken(c.env.DB, row.organizationId, clientId, clientSecret, encryptionKey);
+    } catch (err) {
+      problems.push({
+        organizationId: row.organizationId,
+        reason: err instanceof Error ? err.message : "アクセストークンを取得できません",
+      });
+      continue;
+    }
+
+    let live;
+    try {
+      live = await listMeetings(token, "me", "live");
+    } catch (err) {
+      problems.push({
+        organizationId: row.organizationId,
+        reason: err instanceof Error ? err.message : "開催中のミーティングを取得できません",
+      });
+      continue;
+    }
+
+    for (const m of live) {
+      const meetingId = String(m.id);
+      await upsertZoomMeeting(c.env, row.organizationId, meetingId, {
+        meetingUuid: m.uuid ?? null,
+        topic: m.topic ?? null,
+        hostId: m.host_id ?? null,
+        joinUrl: m.join_url ?? null,
+        startTime: m.start_time ? Date.parse(m.start_time) : null,
+        duration: m.duration ?? null,
+        status: "started",
+      });
+
+      const ensured = await ensureSessionForMeeting(c.env, row.organizationId, meetingId, {
+        topic: m.topic,
+        startTime: m.start_time ? Date.parse(m.start_time) : null,
+        durationMin: m.duration ?? null,
+      });
+      const session = ensured.session;
+      if (!session) continue;
+
+      if (session.status !== "LIVE") {
+        await db
+          .update(trainingSessions)
+          .set({ status: "LIVE", updatedAt: Date.now() })
+          .where(eq(trainingSessions.id, session.id));
+      }
+
+      // The passcode is a credential: fetched per poll, handed to the bot over
+      // its authenticated channel, never written to our database.
+      let passcode: string | null = null;
+      try {
+        const detail = await getMeetingDetail(token, meetingId);
+        passcode = detail.password ?? null;
+      } catch {
+        // A meeting with no passcode, or a scope the tenant has not granted.
+        // The bot can still try to join; join_before_host meetings need none.
+      }
+
+      assignments.push({
+        organizationId: row.organizationId,
+        meetingId,
+        meetingUuid: m.uuid ?? null,
+        topic: m.topic ?? null,
+        passcode,
+        sessionId: session.id,
+        // Cadence comes from the tenant's own monitoring settings so the bot
+        // never has to be reconfigured when an administrator changes them.
+        observeIntervalSec: config.normalIntervalSec,
+        snapshotsEnabled: config.snapshotsEnabled,
+        identityEnabled: config.identityVerificationEnabled,
+        drowsinessEnabled: config.drowsinessEnabled,
+        identityThreshold: config.identityConfidenceThreshold,
+      });
+    }
+  }
+
+  console.log(
+    JSON.stringify({
+      level: "info",
+      message: "bot assignments served",
+      tenants: connected.length,
+      assignments: assignments.length,
+      problems: problems.length,
+    }),
+  );
+
+  return c.json({ assignments, problems, pollAfterSec: 20 });
 });
 
 export default app;

@@ -27,6 +27,10 @@ inline std::string base64(const unsigned char* data, size_t len) {
  * Encode contiguous I420 planes (Y then U then V, no inter-plane padding) to a
  * base64 JPEG. Zoom delivers YUVRawDataI420 with separate plane pointers; pass
  * them via GetYBuffer/GetUBuffer/GetVBuffer.
+ *
+ * Returns an empty string on failure, which every caller must treat as "no
+ * frame this round" rather than as an error worth reporting: a dropped frame
+ * during a resolution change is normal.
  */
 inline std::string encodeI420(const unsigned char* y, const unsigned char* u, const unsigned char* v,
                               int width, int height, int quality = 80) {

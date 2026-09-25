@@ -151,12 +151,43 @@ export function modelsReady(): boolean {
 }
 
 let detectorOptions: InstanceType<FaceApi["TinyFaceDetectorOptions"]> | null = null;
+const sizedOptions = new Map<number, InstanceType<FaceApi["TinyFaceDetectorOptions"]>>();
 
 /** Built once the module is loaded; 320px input keeps detection real-time. */
 function detectorOpts(api: FaceApi) {
   detectorOptions ??= new api.TinyFaceDetectorOptions({ inputSize: 320, scoreThreshold: 0.45 });
   return detectorOptions;
 }
+
+function sizedDetectorOpts(api: FaceApi, inputSize: number) {
+  let opts = sizedOptions.get(inputSize);
+  if (!opts) {
+    opts = new api.TinyFaceDetectorOptions({ inputSize, scoreThreshold: 0.4 });
+    sizedOptions.set(inputSize, opts);
+  }
+  return opts;
+}
+
+/**
+ * Detector input sizes tried for a still photo, in order.
+ *
+ * A still is analysed once rather than 5 times a second, so it can afford a
+ * larger input than the live preview's 320px — which matters because an
+ * enrollment photo is often taken from further away than a webcam ever is.
+ *
+ * The sizes are measured, not guessed. On the same 940×1280 portrait,
+ * TinyFaceDetector scored 0.956 at 320, 0.963 at 416, **0.549 at 512**, 0.984
+ * at 608 and 0.941 at 800. 512 is a valid face-api input size but lands badly
+ * against this detector's anchor scales, and because `occlusion` is derived
+ * from the detection score (see `analyseFrame`), that dip alone was enough to
+ * get a clean, unobstructed portrait rejected with "顔が遮蔽されています".
+ * 416 is face-api's own default and the reliable first choice; 608 is the
+ * escalation for faces it finds small or marginal.
+ */
+const STILL_INPUT_SIZES = [416, 608];
+
+/** Above this the first pass is accepted; below it, the next size is tried. */
+const STILL_GOOD_SCORE = 0.7;
 
 function distance(a: { x: number; y: number }, b: { x: number; y: number }): number {
   return Math.hypot(a.x - b.x, a.y - b.y);
@@ -207,9 +238,25 @@ function estimatePose(points: { x: number; y: number }[]): { yaw: number; pitch:
   return { yaw, pitch };
 }
 
+/**
+ * Anything face-api can detect on and `drawImage` can sample from: the live
+ * camera, a still photo being enrolled, or an offscreen canvas.
+ */
+export type AnalysableSource = HTMLVideoElement | HTMLImageElement | HTMLCanvasElement;
+
+/**
+ * Intrinsic pixel dimensions. Duck-typed rather than `instanceof`, so this
+ * module stays importable where the DOM constructors do not exist.
+ */
+function sourceSize(source: AnalysableSource): { width: number; height: number } {
+  if ("videoWidth" in source) return { width: source.videoWidth, height: source.videoHeight };
+  if ("naturalWidth" in source) return { width: source.naturalWidth, height: source.naturalHeight };
+  return { width: source.width, height: source.height };
+}
+
 /** Mean luminance and Laplacian-variance sharpness over the face crop. */
 function measureExposure(
-  source: HTMLVideoElement | HTMLCanvasElement,
+  source: AnalysableSource,
   box: { x: number; y: number; width: number; height: number },
 ): { brightness: number; sharpness: number } {
   const SIZE = 48;
@@ -268,14 +315,15 @@ function measureExposure(
 export interface AnalyseOptions {
   /** Descriptors cost real time; skip them on frames that only need presence. */
   withDescriptor?: boolean;
+  /** Detector input size. Omit for the live-preview default of 320. */
+  inputSize?: number;
 }
 
 export async function analyseFrame(
-  video: HTMLVideoElement,
+  source: AnalysableSource,
   options: AnalyseOptions = {},
 ): Promise<FrameAnalysis> {
-  const width = video.videoWidth;
-  const height = video.videoHeight;
+  const { width, height } = sourceSize(source);
   if (!width || !height || !modelsReady() || !faceapi) {
     return { faces: [], faceCount: 0, quality: EMPTY_QUALITY, width, height };
   }
@@ -284,7 +332,8 @@ export async function analyseFrame(
   // withFaceLandmarks() uses the full 68-point net that loadModels() loads;
   // passing `true` would select the tiny landmark net, which is neither loaded
   // nor shipped in public/models and throws once a face is actually found.
-  const base = api.detectAllFaces(video, detectorOpts(api)).withFaceLandmarks();
+  const opts = options.inputSize ? sizedDetectorOpts(api, options.inputSize) : detectorOpts(api);
+  const base = api.detectAllFaces(source, opts).withFaceLandmarks();
   const results = options.withDescriptor ? await base.withFaceDescriptors() : await base;
 
   const faces: FaceObservation[] = results.map((r) => {
@@ -312,7 +361,7 @@ export async function analyseFrame(
     a.box.width * a.box.height >= b.box.width * b.box.height ? a : b,
   );
   const { yaw, pitch } = estimatePose(primary.landmarks);
-  const { brightness, sharpness } = measureExposure(video, primary.box);
+  const { brightness, sharpness } = measureExposure(source, primary.box);
 
   return {
     faces,
@@ -350,6 +399,113 @@ export function captureFrame(video: HTMLVideoElement, quality = 0.72, maxWidth =
   if (!ctx) return "";
   ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
   return canvas.toDataURL("image/jpeg", quality);
+}
+
+/**
+ * Longest edge a still photo is scaled to before analysis.
+ *
+ * Phone photos are routinely 4000px wide. Detection would downscale internally
+ * anyway, but the landmark and descriptor passes crop from whatever we hand
+ * them, and a folder of full-resolution originals otherwise exhausts GPU memory
+ * long before the batch finishes. 1280px keeps a face well above the size the
+ * recognition net needs.
+ */
+const STILL_MAX_EDGE = 1280;
+
+export interface DecodedImage {
+  /** Canvas holding the (possibly downscaled) photo, ready for analysis. */
+  canvas: HTMLCanvasElement;
+  /** Intrinsic size of the original file, for reporting. */
+  naturalWidth: number;
+  naturalHeight: number;
+}
+
+/**
+ * Decodes an image file into a canvas sized for analysis.
+ *
+ * Goes through a canvas rather than handing the `<img>` straight to face-api so
+ * that the downscale happens once, and so the same pixels can be reused for the
+ * preview thumbnail without decoding the file a second time.
+ */
+export async function decodeImageFile(file: Blob): Promise<DecodedImage> {
+  const url = URL.createObjectURL(file);
+  try {
+    const img = new Image();
+    img.decoding = "async";
+    await new Promise<void>((resolve, reject) => {
+      img.onload = () => resolve();
+      img.onerror = () => reject(new Error("画像を読み込めません"));
+      img.src = url;
+    });
+
+    const naturalWidth = img.naturalWidth;
+    const naturalHeight = img.naturalHeight;
+    if (!naturalWidth || !naturalHeight) throw new Error("画像を読み込めません");
+
+    const scale = Math.min(1, STILL_MAX_EDGE / Math.max(naturalWidth, naturalHeight));
+    const canvas = document.createElement("canvas");
+    canvas.width = Math.max(1, Math.round(naturalWidth * scale));
+    canvas.height = Math.max(1, Math.round(naturalHeight * scale));
+    const ctx = canvas.getContext("2d");
+    if (!ctx) throw new Error("画像を処理できません");
+    ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
+    return { canvas, naturalWidth, naturalHeight };
+  } finally {
+    // Safe even though decode is complete: the bitmap is already in the canvas.
+    URL.revokeObjectURL(url);
+  }
+}
+
+export interface PhotoAnalysis extends FrameAnalysis {
+  /** The face the descriptor was taken from, or null when none was usable. */
+  primary: FaceObservation | null;
+  /** Small JPEG of the photo, for showing the operator what was enrolled. */
+  preview: string;
+}
+
+/**
+ * Full still-photo enrollment pass: decode, detect, and extract a descriptor.
+ *
+ * Callers still have to decide whether the result is good enough to enroll —
+ * `photoRejection` in `photo-enroll.ts` applies that policy, because it is a
+ * product rule rather than an engine capability.
+ */
+export async function analysePhotoFile(file: Blob): Promise<PhotoAnalysis> {
+  await loadModels();
+  const { canvas } = await decodeImageFile(file);
+
+  // Escalate through STILL_INPUT_SIZES, keeping the most confident result. The
+  // second pass is only paid for when the first is weak, and a weak first pass
+  // is exactly the case that would otherwise be rejected as "occluded".
+  let best: FrameAnalysis | null = null;
+  let bestFace: FaceObservation | null = null;
+  for (const inputSize of STILL_INPUT_SIZES) {
+    const analysis = await analyseFrame(canvas, { withDescriptor: true, inputSize });
+    const face = largestFace(analysis);
+    if (!best || (face?.score ?? 0) > (bestFace?.score ?? 0)) {
+      best = analysis;
+      bestFace = face;
+    }
+    if (face && face.score >= STILL_GOOD_SCORE) break;
+  }
+
+  return {
+    ...(best as FrameAnalysis),
+    primary: bestFace,
+    preview: thumbnailOf(canvas),
+  };
+}
+
+/** Small JPEG used only for the operator's own review of a batch. */
+function thumbnailOf(canvas: HTMLCanvasElement, maxEdge = 160): string {
+  const scale = Math.min(1, maxEdge / Math.max(canvas.width, canvas.height, 1));
+  const out = document.createElement("canvas");
+  out.width = Math.max(1, Math.round(canvas.width * scale));
+  out.height = Math.max(1, Math.round(canvas.height * scale));
+  const ctx = out.getContext("2d");
+  if (!ctx) return "";
+  ctx.drawImage(canvas, 0, 0, out.width, out.height);
+  return out.toDataURL("image/jpeg", 0.7);
 }
 
 export function descriptorToArray(descriptor: Float32Array): number[] {

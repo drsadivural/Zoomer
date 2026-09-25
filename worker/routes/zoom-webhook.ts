@@ -12,13 +12,14 @@
 import { and, eq } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/d1";
 import { Hono } from "hono";
-import { integrations, sessionParticipants, trainingSessions, webhookDeliveries, zoomMeetings } from "../db/schema";
+import { sessionParticipants, trainingSessions, webhookDeliveries, zoomMeetings } from "../db/schema";
 import { recordAudit } from "../lib/audit";
 import { sha256Hex } from "../lib/crypto";
 import { newId } from "../lib/ids";
 import { publishToSession } from "../lib/realtime";
 import { buildUrlValidationResponse, matchParticipantToTrainee, verifyWebhookSignature } from "../lib/zoom";
 import type { Env, Variables } from "../types";
+import { ensureSessionForMeeting, resolveOrganizationForMeeting } from "../services/zoom/auto-session";
 import { reconcileZoomParticipant } from "./zoom";
 
 const app = new Hono<{ Bindings: Env; Variables: Variables }>();
@@ -53,47 +54,17 @@ interface ZoomWebhookBody {
 }
 
 /**
- * Resolves which tenant a delivery belongs to.
- *
- * Ordered by strength of evidence:
- *   1. the Zoom account id recorded when OAuth was completed;
- *   2. the meeting id, which is already linked to exactly one tenant's session —
- *      this keeps the roster working even if the webhook is configured before
- *      OAuth, or if Zoom omits `account_id`;
- *   3. a single connected tenant, which is unambiguous by definition.
- * With more than one candidate and no stronger signal, we refuse to guess.
+ * Tenant attribution lives in the auto-session service so that the webhook, the
+ * bot-assignment poller and `/bot/observe` all agree on which customer a
+ * meeting belongs to. Divergence here would mean one caller creating a session
+ * under a tenant another caller refuses to serve.
  */
 async function resolveOrganization(
   env: Env,
   accountId?: string,
   meetingId?: string | null,
 ): Promise<string | null> {
-  const db = drizzle(env.DB);
-
-  if (accountId) {
-    const rows = await db
-      .select({ organizationId: integrations.organizationId })
-      .from(integrations)
-      .where(and(eq(integrations.provider, "zoom"), eq(integrations.accountId, accountId)))
-      .limit(1);
-    if (rows[0]) return rows[0].organizationId;
-  }
-
-  if (meetingId) {
-    const linked = await db
-      .select({ organizationId: trainingSessions.organizationId })
-      .from(trainingSessions)
-      .where(eq(trainingSessions.zoomMeetingId, meetingId))
-      .limit(2);
-    if (linked.length === 1) return linked[0].organizationId;
-  }
-
-  const connected = await db
-    .select({ organizationId: integrations.organizationId })
-    .from(integrations)
-    .where(and(eq(integrations.provider, "zoom"), eq(integrations.status, "CONNECTED")))
-    .limit(2);
-  return connected.length === 1 ? connected[0].organizationId : null;
+  return resolveOrganizationForMeeting(env, accountId, meetingId);
 }
 
 /** Finds the training session linked to a Zoom meeting id. */
@@ -194,7 +165,14 @@ app.post("/", async (c) => {
     case "meeting.started": {
       if (!meetingId) break;
       await upsertMeeting(c.env, organizationId, meetingId, object, "started");
-      const session = await findSession(c.env, organizationId, meetingId);
+      // Creates the session when the tenant has not linked one by hand. Without
+      // this, every later participant event for this meeting is discarded.
+      const ensured = await ensureSessionForMeeting(c.env, organizationId, meetingId, {
+        topic: object?.topic,
+        startTime: object?.start_time ? Date.parse(object.start_time) : null,
+        durationMin: object?.duration ?? null,
+      });
+      const session = ensured.session;
       if (session) {
         await db
           .update(trainingSessions)
@@ -204,7 +182,7 @@ app.post("/", async (c) => {
           status: "LIVE",
           zoomMeetingId: meetingId,
         });
-        result = { ok: true, sessionId: session.id, status: "LIVE" };
+        result = { ok: true, sessionId: session.id, status: "LIVE", createdSession: ensured.created };
       }
       break;
     }
@@ -229,7 +207,9 @@ app.post("/", async (c) => {
     case "meeting.participant_joined": {
       const participant = object?.participant;
       if (!meetingId || !participant) break;
-      const session = await findSession(c.env, organizationId, meetingId);
+      // A participant event can arrive before `meeting.started` (Zoom does not
+      // guarantee ordering), so the session is ensured here too.
+      const session = (await ensureSessionForMeeting(c.env, organizationId, meetingId)).session;
       if (!session) {
         result = { ok: true, ignored: "no linked session" };
         break;

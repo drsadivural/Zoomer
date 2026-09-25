@@ -10,6 +10,10 @@ set(ZOOM_SDK_DIR "/home/ubuntu/zoom-meeting-sdk" CACHE PATH "Zoom Meeting SDK di
 find_package(OpenSSL REQUIRED)          # jwt HMAC (libssl-dev)
 find_package(CURL REQUIRED)             # ingest HTTP (libcurl4-openssl-dev)
 find_package(nlohmann_json REQUIRED)    # JSON wire (nlohmann-json3-dev)
+find_package(PkgConfig REQUIRED)
+# The Linux Meeting SDK delivers every callback on a glib main loop, so the bot
+# has to run one (libglib2.0-dev).
+pkg_check_modules(GLIB REQUIRED IMPORTED_TARGET glib-2.0)
 find_library(TURBOJPEG_LIB turbojpeg REQUIRED)   # I420->JPEG (libturbojpeg0-dev)
 find_path(TURBOJPEG_INC turbojpeg.h REQUIRED)
 
@@ -25,6 +29,7 @@ target_link_libraries(zoomer-bot PRIVATE
   CURL::libcurl
   nlohmann_json::nlohmann_json
   ${TURBOJPEG_LIB}
+  PkgConfig::GLIB
   pthread)
 # Resolve libmeetingsdk.so and its bundled Qt at runtime.
 set_target_properties(zoomer-bot PROPERTIES

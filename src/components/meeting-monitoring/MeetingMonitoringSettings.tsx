@@ -31,6 +31,16 @@ const FEATURES: { key: BooleanKey; label: string; hint: string }[] = [
   { key: "drowsinessEnabled", label: "閉眼・居眠り疑いの検知", hint: "閉眼の継続を検知します。あくまで「疑い」であり、自動判定はしません" },
   { key: "participationAnalyticsEnabled", label: "参加状況の集計", hint: "発話時間・発話回数を集計します" },
   { key: "transcriptEnabled", label: "文字起こし解析", hint: "Zoomの文字起こしが利用可能な場合のみ（任意）" },
+  {
+    key: "autoSessionEnabled",
+    label: "Zoom会議の自動取り込み",
+    hint: "連携中のZoomアカウントで会議が開始されたとき、対応する研修を自動作成して参加者を取り込みます",
+  },
+  {
+    key: "botAutoJoinEnabled",
+    label: "監視ボットの自動参加",
+    hint: "Ayonix監視ボットが開催中の会議に自動で参加し、各参加者の映像を解析します",
+  },
 ];
 
 export function MeetingMonitoringSettingsCard() {

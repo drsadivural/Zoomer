@@ -786,6 +786,11 @@ export const meetingMonitoringSettings = sqliteTable("meeting_monitoring_setting
 
   alertNotificationsEnabled: integer("alert_notifications_enabled", { mode: "boolean" }).notNull().default(true),
 
+  /** Bind a starting Zoom meeting to a training session without being asked. */
+  autoSessionEnabled: integer("auto_session_enabled", { mode: "boolean" }).notNull().default(true),
+  /** Let the Meeting-SDK recognition bot join live meetings unattended. */
+  botAutoJoinEnabled: integer("bot_auto_join_enabled", { mode: "boolean" }).notNull().default(true),
+
   updatedAt: integer("updated_at").notNull().default(now),
   updatedBy: text("updated_by"),
 });
