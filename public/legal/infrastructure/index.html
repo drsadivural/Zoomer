@@ -1,0 +1,107 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" /><meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Infrastructure and Dependency Management Policy — Ayonix Zoomer</title>
+<meta name="description" content="How Ayonix Zoomer infrastructure is provisioned, configured, monitored and recovered, and how third-party dependencies are controlled." />
+<link rel="icon" href="/favicon.svg" type="image/svg+xml" />
+<link rel="preconnect" href="https://fonts.googleapis.com" /><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700;800&family=Noto+Sans+JP:wght@400;500;700&display=swap" rel="stylesheet" />
+<link rel="stylesheet" href="/legal/policy.css" />
+</head>
+<body>
+<header><div class="wrap">
+  <a class="brand" href="/legal/"><div class="mark">A</div><div><div class="brand-name">AYONIX</div><div class="brand-sub">ZOOMER</div></div></a>
+  <h1>Infrastructure and Dependency Management Policy</h1>
+  <p class="meta">Version 1.0 · Effective 25 September 2026 · Owner: Ayonix engineering · Reviewed annually</p>
+  <nav class="crumbs"><a href="/legal/">All policies</a><a href="/legal/privacy/">Privacy</a><a href="/legal/security/">Security</a><a href="/legal/ssdlc/">SSDLC</a><a href="/legal/incident-response/">Incident response</a><a href="/legal/vulnerability-management/">Vulnerability management</a></nav>
+</div></header>
+<main>
+<section>
+  <h2>1. Architecture</h2>
+  <table>
+    <thead><tr><th>Component</th><th>Platform</th><th>Purpose</th></tr></thead>
+    <tbody>
+      <tr><td>Application and API</td><td>Cloudflare Workers</td><td>Serverless request handling. No customer-managed servers, no SSH, no operating system to patch.</td></tr>
+      <tr><td>Database</td><td>Cloudflare D1 (APAC)</td><td>Trainees, sessions, events, audit log.</td></tr>
+      <tr><td>Object storage</td><td>Cloudflare R2 (APAC)</td><td>Encrypted evidence images and generated reports.</td></tr>
+      <tr><td>Realtime coordination</td><td>Cloudflare Durable Objects</td><td>Live dashboard state fan-out.</td></tr>
+      <tr><td>Edge security</td><td>Cloudflare</td><td>TLS termination, DDoS protection, WAF, CDN.</td></tr>
+      <tr><td>Face analysis</td><td>On-device, or a dedicated GPU host</td><td>Inference. Deliberately kept off the serverless tier.</td></tr>
+    </tbody>
+  </table>
+  <p>
+    A serverless platform removes a large class of infrastructure risk — no unpatched operating systems,
+    no exposed management ports, no long-lived instances to drift. It concentrates the remaining risk in
+    configuration and dependencies, which is what the rest of this policy addresses.
+  </p>
+</section>
+
+<section>
+  <h2>2. Configuration management</h2>
+  <ul>
+    <li>Infrastructure is declared in version-controlled configuration and deployed from it. Bindings, routes, scheduled jobs and storage are code-reviewed like any other change.</li>
+    <li><strong>Secrets are never in the repository.</strong> They live in the platform secret store and are write-only — they cannot be read back, including by the engineer who set them.</li>
+    <li>Development environments use separate keys and separate storage. Production keys are never used outside production.</li>
+    <li>Security response headers are applied both at the application and at the static-asset layer, because assets are served before application code runs.</li>
+  </ul>
+</section>
+
+<section>
+  <h2>3. Dependency management</h2>
+  <ul>
+    <li><strong>Lockfile pinned.</strong> Builds install from a committed lockfile with integrity hashes, so a build is reproducible and a tampered package fails verification.</li>
+    <li><strong>Canonical registry.</strong> Lockfile entries must reference the canonical public registry over HTTPS. Local registry mirrors are permitted for speed but must not be written into the lockfile — a lockfile that only resolves on one machine is a defect, and plaintext mirror URLs are a supply-chain risk.</li>
+    <li><strong>Automated updates</strong> via Dependabot: minor and patch grouped weekly, majors individually so each can be tested honestly.</li>
+    <li><strong>Audit gate.</strong> High and critical advisories in runtime dependencies fail the build.</li>
+    <li><strong>Minimise the surface.</strong> Face-recognition models are self-hosted rather than fetched from a third-party CDN; the only external origins the application contacts are the web-font hosts.</li>
+    <li>Third-party scripts are constrained by Content-Security-Policy; any script the policy does not permit simply does not execute.</li>
+  </ul>
+</section>
+
+<section>
+  <h2>4. Data residency and retention</h2>
+  <ul>
+    <li>Storage is pinned to the <strong>Asia-Pacific</strong> region.</li>
+    <li>Retention windows are configurable per organisation and enforced by a scheduled job. Records carry the expiry computed when they were written, so shortening a window applies to new data and cannot retroactively re-date existing evidence.</li>
+    <li>Deletions are recorded in the audit log.</li>
+  </ul>
+</section>
+
+<section>
+  <h2>5. Availability and recovery</h2>
+  <ul>
+    <li>The platform is globally distributed with no single customer-managed instance to fail.</li>
+    <li>Database point-in-time recovery is provided by the platform. Restores are performed into a separate database and verified before any cutover.</li>
+    <li>Deployments are versioned and can be rolled back to a previous version.</li>
+    <li>Database migrations must be <strong>additive</strong> — destructive DDL fails the build — so a rollback of application code never leaves data unreadable.</li>
+    <li>Recovery objectives: <strong>RPO 24 hours, RTO 8 hours.</strong></li>
+  </ul>
+</section>
+
+<section>
+  <h2>6. Monitoring</h2>
+  <ul>
+    <li>Platform observability is enabled; structured application logs cover authentication, integrations, analysis ingestion and errors.</li>
+    <li>Post-deployment verification checks health, security headers and key endpoints.</li>
+    <li>Logs exclude biometric data, object keys and tokens.</li>
+  </ul>
+</section>
+
+<section>
+  <h2>7. Sub-processors</h2>
+  <p>
+    Cloudflare, Inc. (hosting, storage, edge security) and — where a customer connects it — Zoom
+    Communications, Inc. Sub-processor changes are notified to customers before they take effect. Current
+    detail is in the <a href="/legal/privacy/">Privacy Policy</a>.
+  </p>
+</section>
+
+<section>
+  <h2>8. Review</h2>
+  <p>Reviewed annually and whenever the architecture materially changes.</p>
+</section>
+</main>
+<footer><p>© Ayonix Corporation. Zoom is a trademark of Zoom Communications, Inc. Ayonix Zoomer is not affiliated with or endorsed by Zoom Communications, Inc.</p></footer>
+</body>
+</html>

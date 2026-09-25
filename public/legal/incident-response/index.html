@@ -1,0 +1,107 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" /><meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Incident Management and Response Policy — Ayonix Zoomer</title>
+<meta name="description" content="How Ayonix detects, classifies, contains, investigates and communicates security incidents, including breach notification timelines." />
+<link rel="icon" href="/favicon.svg" type="image/svg+xml" />
+<link rel="preconnect" href="https://fonts.googleapis.com" /><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700;800&family=Noto+Sans+JP:wght@400;500;700&display=swap" rel="stylesheet" />
+<link rel="stylesheet" href="/legal/policy.css" />
+</head>
+<body>
+<header><div class="wrap">
+  <a class="brand" href="/legal/"><div class="mark">A</div><div><div class="brand-name">AYONIX</div><div class="brand-sub">ZOOMER</div></div></a>
+  <h1>Incident Management and Response Policy</h1>
+  <p class="meta">Version 1.0 · Effective 25 September 2026 · Owner: Ayonix engineering · Reviewed annually</p>
+  <nav class="crumbs"><a href="/legal/">All policies</a><a href="/legal/privacy/">Privacy</a><a href="/legal/security/">Security</a><a href="/legal/ssdlc/">SSDLC</a><a href="/legal/vulnerability-management/">Vulnerability management</a><a href="/legal/infrastructure/">Infrastructure</a></nav>
+</div></header>
+<main>
+<section>
+  <h2>1. Scope</h2>
+  <p>
+    Any event that compromises, or credibly threatens, the confidentiality, integrity or availability of
+    Ayonix Zoomer or the data it holds. Because the service processes biometric data, <strong>any
+    suspected exposure of face templates or evidence images is treated as Severity 1 from the moment it
+    is suspected</strong>, not from the moment it is confirmed.
+  </p>
+</section>
+
+<section>
+  <h2>2. Severity</h2>
+  <table>
+    <thead><tr><th>Level</th><th>Definition</th><th>Acknowledge</th><th>Customer notice</th></tr></thead>
+    <tbody>
+      <tr><td><strong>S1 — Critical</strong></td><td>Confirmed or suspected exposure of biometric data, evidence images or credentials; cross-tenant data access; full service outage.</td><td>1 hour</td><td>Within 24 hours of confirmation</td></tr>
+      <tr><td><strong>S2 — High</strong></td><td>Exposure of non-biometric personal data; authentication or authorisation bypass; actively exploited vulnerability.</td><td>4 hours</td><td>Within 72 hours</td></tr>
+      <tr><td><strong>S3 — Medium</strong></td><td>Degraded service; a vulnerability with no evidence of exploitation.</td><td>1 business day</td><td>With the fix</td></tr>
+      <tr><td><strong>S4 — Low</strong></td><td>Minor issue with no data impact.</td><td>3 business days</td><td>Release notes</td></tr>
+    </tbody>
+  </table>
+</section>
+
+<section>
+  <h2>3. Response process</h2>
+  <ol>
+    <li><strong>Detect and report.</strong> Sources: automated alerts, the audit log, customer reports, and <a href="mailto:security@ayonix.com">security@ayonix.com</a>. Anyone may raise an incident; nobody needs permission to do so.</li>
+    <li><strong>Triage.</strong> An incident lead is named and assigns a severity. The lead owns the incident until it is closed.</li>
+    <li><strong>Contain.</strong> Revoke credentials, disable the affected path, or roll back. <em>Preserve evidence before changing anything</em> — logs, database state, deployment version.</li>
+    <li><strong>Eradicate and recover.</strong> Fix the cause, verify through the normal pipeline, deploy, and confirm in production.</li>
+    <li><strong>Notify.</strong> See below.</li>
+    <li><strong>Review.</strong> A blameless post-incident review within 5 business days, producing dated, owned corrective actions. Reviews examine the system that permitted the failure, not the person who tripped it.</li>
+  </ol>
+</section>
+
+<section>
+  <h2>4. Notification</h2>
+  <ul>
+    <li><strong>Customers</strong> (data controllers) are notified on the timeline above, with what happened, what data was involved, what we have done and what they should do. We notify on confirmation rather than waiting for a complete investigation.</li>
+    <li><strong>Regulators.</strong> Ayonix acts as a processor and supports the controller's obligations, including the GDPR's 72-hour deadline and reporting to Japan's Personal Information Protection Commission where the APPI requires it. Leakage of 個人識別符号 is expressly reportable.</li>
+    <li><strong>Affected individuals</strong> are notified by the controller; we provide the facts needed to do so.</li>
+    <li>We will not quietly close an incident that affected a customer's data.</li>
+  </ul>
+</section>
+
+<section>
+  <h2>5. Roles</h2>
+  <table>
+    <thead><tr><th>Role</th><th>Responsibility</th></tr></thead>
+    <tbody>
+      <tr><td>Incident lead</td><td>Owns triage, containment and closure. Single decision-maker during the incident.</td></tr>
+      <tr><td>Engineering</td><td>Investigation, fix, verification.</td></tr>
+      <tr><td>Privacy contact</td><td>Regulatory assessment and notification wording.</td></tr>
+      <tr><td>Customer contact</td><td>Communicates with affected customers.</td></tr>
+    </tbody>
+  </table>
+  <p>Ayonix is a small team; one person may hold several roles, but the incident lead is always named explicitly.</p>
+</section>
+
+<section>
+  <h2>6. Evidence and records</h2>
+  <p>
+    Every incident is recorded: timeline, severity, systems and data involved, actions taken, who was
+    notified and when, and the corrective actions. Records are retained for at least two years.
+  </p>
+</section>
+
+<section>
+  <h2>7. Testing</h2>
+  <p>
+    The process is exercised at least annually as a tabletop walkthrough of a realistic scenario — most
+    usefully, suspected exposure of biometric templates — and the policy is updated with what the
+    exercise finds.
+  </p>
+</section>
+
+<section>
+  <h2>8. Contact</h2>
+  <p>
+    Security incidents: <a href="mailto:security@ayonix.com">security@ayonix.com</a> ·
+    Privacy: <a href="mailto:privacy@ayonix.com">privacy@ayonix.com</a> ·
+    Support: <a href="mailto:support@ayonix.com">support@ayonix.com</a>
+  </p>
+</section>
+</main>
+<footer><p>© Ayonix Corporation. Zoom is a trademark of Zoom Communications, Inc. Ayonix Zoomer is not affiliated with or endorsed by Zoom Communications, Inc.</p></footer>
+</body>
+</html>

@@ -1,0 +1,44 @@
+# Dynamic application security testing.
+#
+# Separate from the SAST workflow because it tests a *running* service rather
+# than source, so it cannot gate a pull request — there is nothing deployed yet
+# to scan. It runs on a schedule and on demand, and publishes the scanner's own
+# report as an artifact, which is what a security review will ask for.
+#
+# Baseline (passive) by design: it spiders and observes. An active scan sends
+# attack traffic and must never be pointed at production holding biometric data
+# without a scheduled window and the customer's agreement.
+name: DAST
+
+on:
+  schedule:
+    - cron: "43 4 * * 1" # Mondays, after the weekly SAST run
+  workflow_dispatch:
+    inputs:
+      target:
+        description: Target URL to scan
+        required: false
+        default: https://zoomer.ayonix.com
+
+permissions:
+  contents: read
+
+jobs:
+  zap-baseline:
+    name: OWASP ZAP baseline
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: ZAP baseline scan
+        uses: zaproxy/action-baseline@v0.12.0
+        with:
+          target: ${{ github.event.inputs.target || 'https://zoomer.ayonix.com' }}
+          # -I: report findings but do not fail the job on warnings. Warnings here
+          # are reviewed, not auto-blocking — several are inherent to the stack
+          # (inline styles, no SRI on a web font) and are documented rather than
+          # suppressed silently.
+          cmd_options: "-I -m 5"
+          allow_issue_writing: false
+          artifact_name: zap-baseline-report

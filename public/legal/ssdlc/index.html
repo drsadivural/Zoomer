@@ -1,0 +1,89 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" /><meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Secure Development Lifecycle — Ayonix Zoomer</title>
+<meta name="description" content="How changes to Ayonix Zoomer are designed, reviewed, tested, scanned and released, including the automated security gates in CI." />
+<link rel="icon" href="/favicon.svg" type="image/svg+xml" />
+<link rel="preconnect" href="https://fonts.googleapis.com" /><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700;800&family=Noto+Sans+JP:wght@400;500;700&display=swap" rel="stylesheet" />
+<link rel="stylesheet" href="/legal/policy.css" />
+</head>
+<body>
+<header><div class="wrap">
+  <a class="brand" href="/legal/"><div class="mark">A</div><div><div class="brand-name">AYONIX</div><div class="brand-sub">ZOOMER</div></div></a>
+  <h1>Secure Development Lifecycle</h1>
+  <p class="meta">Version 1.0 · Effective 25 September 2026 · Owner: Ayonix engineering · Reviewed annually</p>
+  <nav class="crumbs"><a href="/legal/">All policies</a><a href="/legal/privacy/">Privacy</a><a href="/legal/security/">Security</a><a href="/legal/incident-response/">Incident response</a><a href="/legal/vulnerability-management/">Vulnerability management</a><a href="/legal/infrastructure/">Infrastructure</a></nav>
+</div></header>
+<main>
+<section>
+  <h2>1. Purpose</h2>
+  <p>
+    This policy defines how a change reaches production. It is deliberately short and entirely
+    enforced by automation: a process that depends on people remembering is a process that reports
+    success while doing nothing.
+  </p>
+</section>
+
+<section>
+  <h2>2. Lifecycle</h2>
+  <table>
+    <thead><tr><th>Stage</th><th>What happens</th><th>Enforced by</th></tr></thead>
+    <tbody>
+      <tr><td>Design</td><td>Security-relevant changes — anything touching authentication, biometric data, tenancy or evidence — are designed against the documented architecture before implementation.</td><td>Review</td></tr>
+      <tr><td>Implement</td><td>Work happens on a branch. Direct commits to <code>main</code> are avoided; changes land through pull requests.</td><td>Pull request workflow</td></tr>
+      <tr><td>Verify</td><td>Type checking, linting, unit and integration tests, and a production build run on every push and pull request.</td><td>CI workflow</td></tr>
+      <tr><td>Scan</td><td>Static analysis, dependency audit and secret scanning run on every pull request and weekly on a schedule.</td><td>Security workflow</td></tr>
+      <tr><td>Review</td><td>A human reviews the diff, the scan results and the test evidence.</td><td>Pull request review</td></tr>
+      <tr><td>Release</td><td>Database migrations are applied before the application is deployed. Migrations must be additive.</td><td>CI guard + runbook</td></tr>
+      <tr><td>Verify in production</td><td>Health, security headers and key endpoints are checked after every deploy.</td><td>Deployment checklist</td></tr>
+    </tbody>
+  </table>
+</section>
+
+<section>
+  <h2>3. Automated gates</h2>
+  <table>
+    <thead><tr><th>Gate</th><th>Tool</th><th>When</th><th>On failure</th></tr></thead>
+    <tbody>
+      <tr><td>Static application security testing</td><td>GitHub CodeQL, <code>security-extended</code> query suite</td><td>Every PR and push; weekly</td><td>Findings raised as code-scanning alerts</td></tr>
+      <tr><td>Dependency audit</td><td><code>npm audit</code></td><td>Every PR and push; weekly</td><td><strong>Build fails</strong> on high or critical in runtime dependencies</td></tr>
+      <tr><td>Secret scanning</td><td>gitleaks, full git history</td><td>Every PR and push; weekly</td><td>Build fails</td></tr>
+      <tr><td>Dynamic application security testing</td><td>OWASP ZAP baseline</td><td>Weekly and on demand against the running service</td><td>Report reviewed; failures triaged</td></tr>
+      <tr><td>Type safety</td><td>TypeScript, no implicit <code>any</code> escape</td><td>Every PR and push</td><td>Build fails</td></tr>
+      <tr><td>Lint</td><td>ESLint with <code>eslint-plugin-security</code></td><td>Every PR and push</td><td>Build fails</td></tr>
+      <tr><td>Tests</td><td>Vitest — unit and integration</td><td>Every PR and push</td><td>Build fails</td></tr>
+      <tr><td>Migration safety</td><td>Custom CI check</td><td>Every PR and push</td><td>Build fails on destructive DDL</td></tr>
+      <tr><td>Dependency currency</td><td>Dependabot</td><td>Weekly</td><td>Pull request raised</td></tr>
+    </tbody>
+  </table>
+</section>
+
+<section>
+  <h2>4. Separation of duties and change control</h2>
+  <ul>
+    <li>Production secrets are stored in the platform secret store. They are write-only: they cannot be read back, including by the engineers who set them.</li>
+    <li>Secrets are never committed. The repository ignores local secret files, and secret scanning covers the full history.</li>
+    <li>Every production change is traceable to a commit, and every commit to a pull request.</li>
+    <li>Emergency fixes follow the same pipeline; the pipeline is fast enough that bypassing it is never justified.</li>
+  </ul>
+</section>
+
+<section>
+  <h2>5. Data handling in development</h2>
+  <ul>
+    <li><strong>Production biometric data is never copied to a development environment.</strong></li>
+    <li>Local and staging environments use synthetic data, including a built-in simulator that generates synthetic meeting participants so the product can be exercised end to end without real personal data.</li>
+    <li>Development environments use their own encryption keys, never production keys.</li>
+  </ul>
+</section>
+
+<section>
+  <h2>6. Review</h2>
+  <p>This policy is reviewed annually, and whenever the pipeline materially changes.</p>
+</section>
+</main>
+<footer><p>© Ayonix Corporation. Zoom is a trademark of Zoom Communications, Inc. Ayonix Zoomer is not affiliated with or endorsed by Zoom Communications, Inc.</p></footer>
+</body>
+</html>

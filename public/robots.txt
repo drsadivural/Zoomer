@@ -1,0 +1,9 @@
+# Ayonix Zoomer. The application itself is authenticated; only the public
+# documentation and policy pages are meant to be indexed.
+User-agent: *
+Disallow: /api/
+Disallow: /join/
+Allow: /docs/
+Allow: /legal/
+
+Sitemap: https://zoomer.ayonix.com/sitemap.xml

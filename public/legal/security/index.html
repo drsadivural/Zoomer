@@ -1,0 +1,111 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" /><meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Security Policy — Ayonix Zoomer</title>
+<meta name="description" content="Ayonix Zoomer security policy: access control, encryption, data protection, secure development, monitoring, and known limitations." />
+<link rel="icon" href="/favicon.svg" type="image/svg+xml" />
+<link rel="preconnect" href="https://fonts.googleapis.com" /><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700;800&family=Noto+Sans+JP:wght@400;500;700&display=swap" rel="stylesheet" />
+<link rel="stylesheet" href="/legal/policy.css" />
+</head>
+<body>
+<header><div class="wrap">
+  <a class="brand" href="/legal/"><div class="mark">A</div><div><div class="brand-name">AYONIX</div><div class="brand-sub">ZOOMER</div></div></a>
+  <h1>Security Policy</h1>
+  <p class="meta">Version 1.0 · Effective 25 September 2026 · Owner: Ayonix engineering · Reviewed annually</p>
+  <nav class="crumbs"><a href="/legal/">All policies</a><a href="/legal/privacy/">Privacy</a><a href="/legal/ssdlc/">SSDLC</a><a href="/legal/incident-response/">Incident response</a><a href="/legal/vulnerability-management/">Vulnerability management</a><a href="/legal/infrastructure/">Infrastructure</a></nav>
+</div></header>
+<main>
+<section>
+  <h2>1. Scope and principle</h2>
+  <p>
+    This policy covers the Ayonix Zoomer service at <code>zoomer.ayonix.com</code>, its supporting
+    infrastructure and the engineering process that changes it. It applies to everyone who commits code
+    or holds production access.
+  </p>
+  <p>
+    The product processes <strong>biometric data</strong>. We therefore state limitations as plainly as
+    controls: a security document that only lists strengths is not useful to the customer relying on it.
+  </p>
+</section>
+
+<section>
+  <h2>2. Access control</h2>
+  <ul>
+    <li><strong>Role-based access</strong> with three roles. Viewing an evidence image and exporting evidence in bulk are deliberately separate permissions, so an operator who triages alerts cannot bulk-export biometric material.</li>
+    <li><strong>Tenant isolation.</strong> Every business record carries an organisation identifier and every query filters on it. A session token presented against another tenant is rejected as an attack signal, not a mistake.</li>
+    <li><strong>Least privilege</strong> for production. Deployment credentials are held by named engineers; there are no shared logins.</li>
+    <li>Administrator sessions are <code>HttpOnly</code>, <code>Secure</code>, <code>SameSite=Lax</code> cookies expiring after 12 hours.</li>
+  </ul>
+</section>
+
+<section>
+  <h2>3. Data protection</h2>
+  <table>
+    <thead><tr><th>Asset</th><th>Control</th></tr></thead>
+    <tbody>
+      <tr><td>Face templates</td><td>AES-256-GCM at rest. Original photographs are not stored. Templates never leave the server.</td></tr>
+      <tr><td>Evidence images</td><td>Disabled by default. When enabled: encrypted at rest, SHA-256 integrity hash, access only via HMAC-signed URLs valid for 60 seconds, every access audited, automatic deletion at end of retention.</td></tr>
+      <tr><td>OAuth tokens</td><td>AES-256-GCM at rest; deleted on disconnect.</td></tr>
+      <tr><td>Meeting video and audio</td><td>Never recorded. Frames analysed in memory and discarded.</td></tr>
+      <tr><td>Audit log</td><td>Append-only; excludes templates, object keys and tokens by construction.</td></tr>
+      <tr><td>Transport</td><td>TLS 1.2 minimum; TLS 1.0 and 1.1 are refused. HSTS with a one-year max-age.</td></tr>
+    </tbody>
+  </table>
+</section>
+
+<section>
+  <h2>4. Application security controls</h2>
+  <ul>
+    <li>Content-Security-Policy, HSTS, <code>X-Content-Type-Options</code>, <code>Referrer-Policy</code> and <code>Permissions-Policy</code> on every response.</li>
+    <li>Parameterised database access through an ORM query builder. No dynamic SQL identifiers anywhere in the codebase.</li>
+    <li>Input validated at every API boundary with declarative schemas.</li>
+    <li>Replay protection on mutating endpoints via <code>Idempotency-Key</code>.</li>
+    <li>Constant-time comparison for tokens and signatures.</li>
+    <li>Server-side re-derivation of every monitoring judgement: a tampered client cannot assert that a face matched.</li>
+  </ul>
+</section>
+
+<section>
+  <h2>5. Secure development</h2>
+  <p>
+    Every change is reviewed and must pass automated verification before it reaches production. The
+    pipeline is described in the <a href="/legal/ssdlc/">Secure Development Lifecycle</a> policy and runs
+    static analysis, dependency auditing, secret scanning, linting, type checking and the full test suite.
+  </p>
+</section>
+
+<section>
+  <h2>6. Logging and monitoring</h2>
+  <ul>
+    <li>Structured application logs covering authentication, integration events, analysis ingestion and errors.</li>
+    <li>An append-only audit log for administrator actions, evidence access and exports.</li>
+    <li>Logs deliberately exclude biometric data, image keys and tokens.</li>
+  </ul>
+</section>
+
+<section>
+  <h2>7. Known limitations</h2>
+  <div class="note"><p>Stated openly because a customer's risk assessment depends on it.</p></div>
+  <ul>
+    <li><strong>No third-party penetration test has been performed to date.</strong> One is planned before general availability.</li>
+    <li><strong>No application-layer rate limiting.</strong> Replay is prevented by idempotency keys, but request volume is not bounded in the application. Edge rate limiting is the intended control.</li>
+    <li><strong>Password authentication is a bootstrap path only.</strong> The runtime caps PBKDF2 at 100,000 iterations, below current guidance. SSO with MFA is the intended production authentication route.</li>
+    <li><strong>Liveness detection is unevaluated</strong> against printed photographs, screen replay and masks.</li>
+    <li><strong>Detection thresholds ship as sample values</strong> and must be tuned on customer data before being relied upon.</li>
+  </ul>
+</section>
+
+<section>
+  <h2>8. Reporting a vulnerability</h2>
+  <p>
+    Email <a href="mailto:security@ayonix.com">security@ayonix.com</a>. We acknowledge within 3 business
+    days. Please do not open a public issue, access other people's data, or run denial-of-service tests
+    against production. Full terms: <a href="/legal/vulnerability-management/">Vulnerability Management</a>.
+  </p>
+</section>
+</main>
+<footer><p>© Ayonix Corporation. Zoom is a trademark of Zoom Communications, Inc. Ayonix Zoomer is not affiliated with or endorsed by Zoom Communications, Inc.</p></footer>
+</body>
+</html>

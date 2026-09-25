@@ -20,6 +20,9 @@
   Referrer-Policy: strict-origin-when-cross-origin
   Permissions-Policy: camera=(self), microphone=(), geolocation=()
   Cross-Origin-Opener-Policy: same-origin
+  # Our assets are only ever loaded by our own pages, so refusing cross-origin
+  # embedding of them costs nothing and closes a DAST finding.
+  Cross-Origin-Resource-Policy: same-origin
   X-DNS-Prefetch-Control: off
   # CSP notes, because each of these allowances is load-bearing:
   #   'wasm-unsafe-eval' + blob: — face-api.js and MediaPipe Tasks Vision
