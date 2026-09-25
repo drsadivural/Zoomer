@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { Camera, FolderOpen, ImagePlus, Plus, Search, Trash2, Upload, UserPlus } from "lucide-react";
+import { Camera, CheckCircle2, FolderOpen, ImagePlus, Plus, Search, Trash2, Upload, UserPlus } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
@@ -327,17 +327,17 @@ function FaceEnrollDialog({
 }: { trainee: Trainee | null; onClose: () => void; onDone: () => void }) {
   const [enrollments, setEnrollments] = useState<Enrollment[]>([]);
   const [consent, setConsent] = useState(false);
-  const [message, setMessage] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [reasons, setReasons] = useState<string[]>([]);
   const [busy, setBusy] = useState(false);
   const [mode, setMode] = useState<EnrollMode>("camera");
+  const [enrolled, setEnrolled] = useState<EnrolledFace | null>(null);
 
   useEffect(() => {
     if (!trainee) return;
     setConsent(false);
     setMode("camera");
-    setMessage(null);
+    setEnrolled(null);
     setError(null);
     setReasons([]);
     api
@@ -351,6 +351,7 @@ function FaceEnrollDialog({
     setBusy(true);
     setError(null);
     setReasons([]);
+    setEnrolled(null);
     try {
       const r = await api.enroll(trainee.id, {
         descriptor: result.descriptor,
@@ -359,7 +360,12 @@ function FaceEnrollDialog({
         quality: result.quality,
         consent: { policyVersion: CONSENT_POLICY_VERSION, scope: CONSENT_SCOPE },
       });
-      setMessage(`顔登録が完了しました（品質 ${percent(r.enrollment.qualityScore, 0)}）`);
+      setEnrolled({
+        preview: result.preview ?? null,
+        name: trainee.name,
+        externalId: trainee.externalId,
+        quality: r.enrollment.qualityScore,
+      });
       const detail = await api.getTrainee(trainee.id);
       setEnrollments(detail.enrollments);
       onDone();
@@ -407,11 +413,7 @@ function FaceEnrollDialog({
           </span>
         </label>
 
-        {message && (
-          <div role="status" className="rounded-xl border border-emerald-200 bg-emerald-50 px-3 py-2 text-sm text-emerald-800">
-            {message}
-          </div>
-        )}
+        {enrolled && <EnrolledConfirmation enrolled={enrolled} />}
         {error && (
           <div role="alert" className="rounded-xl border border-rose-200 bg-rose-50 px-3 py-2 text-sm text-rose-700">
             <div className="font-semibold">{error}</div>
@@ -499,5 +501,52 @@ function ModeTab({
     >
       {children}
     </button>
+  );
+}
+
+interface EnrolledFace {
+  /** In-tab JPEG of the face just enrolled. Never uploaded: the product stores
+   *  encrypted templates only, and says so at /legal/privacy. */
+  preview: string | null;
+  name: string;
+  externalId: string;
+  quality: number;
+}
+
+/**
+ * What was just registered, and for whom.
+ *
+ * The point is to catch the mistake that matters: a template bound to the wrong
+ * person. A quality percentage alone cannot show that — a face beside a name
+ * can, at a glance.
+ */
+function EnrolledConfirmation({ enrolled }: { enrolled: EnrolledFace }) {
+  return (
+    <div
+      role="status"
+      className="flex items-center gap-3 rounded-xl border border-emerald-200 bg-emerald-50 p-3"
+    >
+      {enrolled.preview ? (
+        <img
+          src={enrolled.preview}
+          alt={`${enrolled.name} の登録した顔`}
+          className="size-16 shrink-0 rounded-xl object-cover shadow-sm"
+        />
+      ) : (
+        <div className="avatar-cell size-16 shrink-0 rounded-xl text-base" aria-hidden="true">
+          {enrolled.name.slice(0, 2)}
+        </div>
+      )}
+      <div className="min-w-0">
+        <div className="flex items-center gap-1.5 text-sm font-bold text-emerald-900">
+          <CheckCircle2 className="size-4 shrink-0" />
+          顔登録が完了しました
+        </div>
+        <div className="truncate text-base font-bold text-slate-900">{enrolled.name}</div>
+        <div className="truncate text-xs text-slate-600">
+          {enrolled.externalId} ・ 品質 {percent(enrolled.quality, 0)}
+        </div>
+      </div>
+    </div>
   );
 }

@@ -21,7 +21,9 @@ import {
   Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle,
 } from "@/components/ui/dialog";
 import { api, ApiClientError, type Trainee } from "@/lib/api";
-import { analysePhotoFile, descriptorToArray, ENGINE_ID, MODEL_VERSION } from "@/lib/face/engine";
+import {
+  analysePhotoFile, descriptorToArray, ENGINE_ID, faceThumbnail, MODEL_VERSION,
+} from "@/lib/face/engine";
 import {
   groupPhotosByKey, isEnrollableImage, matchPhotoToTrainee, MATCH_METHOD_LABELS,
   type PhotoMatchMethod,
@@ -67,6 +69,9 @@ interface FileRow {
   outcome: FileOutcome;
   detail: string;
   quality?: number;
+  /** Face that was registered, so the operator can see who each row enrolled.
+   *  In-tab only; nothing is uploaded and no original image is stored. */
+  thumbnail?: string;
 }
 
 interface PlanGroup {
@@ -245,6 +250,7 @@ export function PhotoBatchEnroll({
               outcome: "enrolled",
               detail: "登録しました",
               quality: res.enrollment.qualityScore,
+              thumbnail: faceThumbnail(analysis.canvas, analysis.primary.box),
             });
           } catch (err) {
             let detail = "登録に失敗しました";
@@ -372,6 +378,13 @@ export function PhotoBatchEnroll({
                     {g.files.map((f) => (
                       <li key={f.path} className="flex items-center gap-2 px-3 py-1.5 text-xs">
                         <OutcomeIcon outcome={f.outcome} />
+                        {f.thumbnail && (
+                          <img
+                            src={f.thumbnail}
+                            alt={`${g.traineeName ?? g.key} の登録した顔`}
+                            className="size-8 shrink-0 rounded-lg object-cover"
+                          />
+                        )}
                         <span className="min-w-0 flex-1 truncate text-slate-600">{f.path}</span>
                         <span className="shrink-0 text-slate-500">
                           {f.quality != null ? `品質 ${percent(f.quality, 0)}` : f.detail}
