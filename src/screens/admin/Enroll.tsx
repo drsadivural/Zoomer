@@ -8,6 +8,7 @@ import { api, ApiClientError, type Enrollment, type ImportResult, type Trainee }
 import { AppCard, CardHead, EmptyState, ErrorNotice, LoadingRows, StatusBadge } from "@/components/shell/primitives";
 import { FaceCapture, type CaptureResult } from "@/components/FaceCapture";
 import { PhotoEnroll } from "@/components/PhotoEnroll";
+import { FacePicker, type FaceSelection } from "@/components/FacePicker";
 import { PhotoBatchEnroll } from "@/components/PhotoBatchEnroll";
 import { formatDateTime, percent } from "@/lib/format";
 import { useCan } from "@/lib/auth-context";
@@ -158,27 +159,88 @@ export function EnrollScreen() {
   );
 }
 
+const EMPTY_TRAINEE_FORM = { externalId: "", name: "", department: "", email: "" };
+
 function CreateTraineeDialog({
   open, onOpenChange, onCreated,
 }: { open: boolean; onOpenChange: (v: boolean) => void; onCreated: () => void }) {
-  const [form, setForm] = useState({ externalId: "", name: "", department: "", email: "" });
+  const [form, setForm] = useState(EMPTY_TRAINEE_FORM);
+  const [face, setFace] = useState<FaceSelection | null>(null);
+  const [consent, setConsent] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [reasons, setReasons] = useState<string[]>([]);
+  const [enrolled, setEnrolled] = useState<EnrolledFace | null>(null);
   const [busy, setBusy] = useState(false);
+  /** Resets the picker's own state when a new trainee is started. */
+  const [pickerKey, setPickerKey] = useState(0);
 
+  function reset() {
+    setForm(EMPTY_TRAINEE_FORM);
+    setFace(null);
+    setConsent(false);
+    setError(null);
+    setReasons([]);
+    setEnrolled(null);
+    setPickerKey((k) => k + 1);
+  }
+
+  /**
+   * Creates the trainee, then enrolls the face if one was chosen.
+   *
+   * The two steps are reported separately on purpose. The trainee is created
+   * first and is not rolled back if enrollment is rejected — losing a correctly
+   * entered record because a photo was blurry would be worse than the operator
+   * retrying the photo, and the row is already in the list to retry from.
+   */
   async function submit(e: React.FormEvent) {
     e.preventDefault();
     setBusy(true);
     setError(null);
+    setReasons([]);
+    setEnrolled(null);
     try {
-      await api.createTrainee({
+      const created = await api.createTrainee({
         externalId: form.externalId,
         name: form.name,
         department: form.department || undefined,
         email: form.email || undefined,
       });
-      onOpenChange(false);
-      setForm({ externalId: "", name: "", department: "", email: "" });
-      onCreated();
+
+      if (!face) {
+        onOpenChange(false);
+        reset();
+        onCreated();
+        return;
+      }
+
+      try {
+        const r = await api.enroll(created.trainee.id, {
+          descriptor: face.result.descriptor,
+          engine: face.result.engine,
+          modelVersion: face.result.modelVersion,
+          quality: face.result.quality,
+          consent: { policyVersion: CONSENT_POLICY_VERSION, scope: CONSENT_SCOPE },
+        });
+        setEnrolled({
+          preview: face.result.preview ?? null,
+          name: form.name,
+          externalId: form.externalId,
+          quality: r.enrollment.qualityScore,
+        });
+        // Keep the dialog open so the operator sees whose face was registered,
+        // but the list behind it is already correct.
+        onCreated();
+      } catch (err) {
+        // The trainee exists; only the face failed. Say exactly that.
+        onCreated();
+        if (err instanceof ApiClientError) {
+          setError(`受講者は登録しましたが、顔登録に失敗しました：${err.message}`);
+          const payload = err.payload as { error?: { reasons?: string[] } } | undefined;
+          setReasons(payload?.error?.reasons ?? []);
+        } else {
+          setError("受講者は登録しましたが、顔登録に失敗しました。");
+        }
+      }
     } catch (err) {
       setError(err instanceof ApiClientError ? err.message : "登録に失敗しました");
     } finally {
@@ -187,20 +249,34 @@ function CreateTraineeDialog({
   }
 
   return (
-    <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent>
+    <Dialog
+      open={open}
+      onOpenChange={(v) => {
+        if (busy) return;
+        if (!v) reset();
+        onOpenChange(v);
+      }}
+    >
+      <DialogContent className="max-h-[90vh] overflow-y-auto sm:max-w-lg">
         <DialogHeader>
           <DialogTitle>受講者を追加</DialogTitle>
           <DialogDescription>
             メールアドレスを登録すると、Zoom参加者との自動照合の精度が上がります。
+            顔写真を添えると、同じ操作で顔登録まで完了します。
           </DialogDescription>
         </DialogHeader>
         <form onSubmit={submit} className="space-y-3">
           {error && (
             <div role="alert" className="rounded-xl border border-rose-200 bg-rose-50 px-3 py-2 text-sm text-rose-700">
-              {error}
+              <div className="font-semibold">{error}</div>
+              {reasons.length > 0 && (
+                <ul className="mt-1 list-inside list-disc">
+                  {reasons.map((r) => <li key={r}>{r}</li>)}
+                </ul>
+              )}
             </div>
           )}
+          {enrolled && <EnrolledConfirmation enrolled={enrolled} />}
           <div className="grid gap-3 sm:grid-cols-2">
             <div className="space-y-1.5">
               <label className="field-label" htmlFor="t-id">受講者ID</label>
@@ -219,11 +295,38 @@ function CreateTraineeDialog({
             <label className="field-label" htmlFor="t-email">メールアドレス</label>
             <Input id="t-email" type="email" value={form.email} onChange={(e) => setForm({ ...form, email: e.target.value })} placeholder="misaki.sato@example.co.jp" />
           </div>
+
+          <div className="space-y-2 rounded-xl border border-slate-200 p-3">
+            <div>
+              <p className="field-label">顔写真（任意）</p>
+              <p className="text-xs text-slate-500">
+                いま登録しない場合は、あとから一覧の「顔登録」でも追加できます。
+              </p>
+            </div>
+            <FacePicker key={pickerKey} onChange={setFace} busy={busy} compact />
+            {face && (
+              <label className="flex items-start gap-2.5 rounded-xl border border-cyan-200 bg-cyan-50/60 p-3 text-sm">
+                <input
+                  type="checkbox"
+                  className="mt-0.5"
+                  checked={consent}
+                  onChange={(e) => setConsent(e.target.checked)}
+                />
+                <span className="text-cyan-900">
+                  受講者本人から、顔情報の処理について同意を取得しました。
+                  （同意文面バージョン {CONSENT_POLICY_VERSION}）
+                </span>
+              </label>
+            )}
+          </div>
+
           <DialogFooter>
-            <Button type="button" variant="outline" onClick={() => onOpenChange(false)}>キャンセル</Button>
-            <Button type="submit" disabled={busy} className="gap-1.5">
+            <Button type="button" variant="outline" disabled={busy} onClick={() => { reset(); onOpenChange(false); }}>
+              {enrolled ? "閉じる" : "キャンセル"}
+            </Button>
+            <Button type="submit" disabled={busy || (Boolean(face) && !consent) || Boolean(enrolled)} className="gap-1.5">
               <UserPlus className="size-4" />
-              {busy ? "登録中…" : "登録"}
+              {busy ? "登録中…" : face ? "登録して顔登録" : "登録"}
             </Button>
           </DialogFooter>
         </form>

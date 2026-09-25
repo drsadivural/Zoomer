@@ -48,14 +48,21 @@ app.get("/", requirePermission("trainee:read"), async (c) => {
       email: trainees.email,
       status: trainees.status,
       createdAt: trainees.createdAt,
+      /* `trainees.id` is written out rather than interpolated. In a
+         single-table select Drizzle renders `${trainees.id}` as a bare
+         `"id"`, and SQLite resolves that against the SUBQUERY's table — so
+         this asked for `fe.trainee_id = fe.id`, which is never true, and
+         every trainee showed 未登録 no matter how many faces were enrolled.
+         A join makes Drizzle qualify the reference, which is why only the
+         unjoined queries were affected. */
       enrollmentCount: sql<number>`(
         select count(*) from face_enrollments fe
-        where fe.trainee_id = ${trainees.id}
+        where fe.trainee_id = trainees.id
           and fe.status = 'ACTIVE' and fe.deleted_at is null
       )`,
       lastQuality: sql<number | null>`(
         select fe.quality_score from face_enrollments fe
-        where fe.trainee_id = ${trainees.id}
+        where fe.trainee_id = trainees.id
           and fe.status = 'ACTIVE' and fe.deleted_at is null
         order by fe.created_at desc limit 1
       )`,

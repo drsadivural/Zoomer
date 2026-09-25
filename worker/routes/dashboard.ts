@@ -23,12 +23,16 @@ app.get("/", requirePermission("session:read"), async (c) => {
       startsAt: trainingSessions.startsAt,
       endsAt: trainingSessions.endsAt,
       status: trainingSessions.status,
+      /* Written out, not interpolated — see the note in routes/trainees.ts.
+         Interpolated, these read `sp.session_id = sp.id` and
+         `a.session_id = a.id`, so both counts were always zero. */
       participantCount: sql<number>`(
-        select count(*) from session_participants sp where sp.session_id = ${trainingSessions.id}
+        select count(*) from session_participants sp
+        where sp.session_id = training_sessions.id
       )`,
       alertCount: sql<number>`(
         select count(*) from alerts a
-        where a.session_id = ${trainingSessions.id} and a.state = 'OPEN'
+        where a.session_id = training_sessions.id and a.state = 'OPEN'
       )`,
     })
     .from(trainingSessions)

@@ -50,17 +50,22 @@ app.get("/", requirePermission("session:read"), async (c) => {
       endsAt: trainingSessions.endsAt,
       status: trainingSessions.status,
       zoomMeetingId: trainingSessions.zoomMeetingId,
+      /* Written out, not interpolated — see the note in routes/trainees.ts.
+         Interpolated, every one of these compared a row's foreign key to its
+         own id, so the session list reported 0 participants and 0 alerts
+         however many there were. */
       participantCount: sql<number>`(
-        select count(*) from session_participants sp where sp.session_id = ${trainingSessions.id}
+        select count(*) from session_participants sp
+        where sp.session_id = training_sessions.id
       )`,
       verifiedCount: sql<number>`(
         select count(*) from session_participants sp
-        where sp.session_id = ${trainingSessions.id}
+        where sp.session_id = training_sessions.id
           and sp.status in ('VERIFIED','MONITORING','REVIEWED','COMPLETED')
       )`,
       alertCount: sql<number>`(
         select count(*) from alerts a
-        where a.session_id = ${trainingSessions.id} and a.state = 'OPEN'
+        where a.session_id = training_sessions.id and a.state = 'OPEN'
       )`,
     })
     .from(trainingSessions)
