@@ -38,3 +38,7 @@ tests/**/*.d.ts
 /vitest.config.js
 /drizzle.config.js
 *.tsbuildinfo
+
+# Python bytecode from the bot analysis sidecar.
+__pycache__/
+*.pyc

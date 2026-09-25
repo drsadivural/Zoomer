@@ -91,7 +91,8 @@ export const api = {
 
   dashboard: () => request<DashboardResponse>("/dashboard"),
 
-  listTrainees: (q?: string) => request<TraineeListResponse>("/trainees", { query: { q, limit: 200 } }),
+  listTrainees: (q?: string, offset?: number) =>
+    request<TraineeListResponse>("/trainees", { query: { q, limit: 200, offset } }),
   getTrainee: (id: string) => request<TraineeDetailResponse>(`/trainees/${id}`),
   createTrainee: (body: NewTrainee) =>
     request<{ trainee: { id: string } }>("/trainees", { method: "POST", body }),
@@ -283,6 +284,9 @@ export interface Trainee extends NewTrainee {
 export interface TraineeListResponse {
   trainees: Trainee[];
   total: number;
+  /** Server-applied page size (capped at 200) and offset, for paging the roster. */
+  limit?: number;
+  offset?: number;
 }
 
 export interface Enrollment {
@@ -630,6 +634,10 @@ export interface MeetingMonitoringConfig {
   eventRetentionDays: number;
   transcriptRetentionDays: number;
   alertNotificationsEnabled: boolean;
+  /** Bind a starting Zoom meeting to a training session automatically. */
+  autoSessionEnabled: boolean;
+  /** Let the Meeting-SDK recognition bot join live meetings unattended. */
+  botAutoJoinEnabled: boolean;
 }
 
 export interface StartAnalysisRequest {

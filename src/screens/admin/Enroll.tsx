@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { Camera, Plus, Search, Trash2, Upload, UserPlus } from "lucide-react";
+import { Camera, FolderOpen, ImagePlus, Plus, Search, Trash2, Upload, UserPlus } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
@@ -7,6 +7,8 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@
 import { api, ApiClientError, type Enrollment, type ImportResult, type Trainee } from "@/lib/api";
 import { AppCard, CardHead, EmptyState, ErrorNotice, LoadingRows, StatusBadge } from "@/components/shell/primitives";
 import { FaceCapture, type CaptureResult } from "@/components/FaceCapture";
+import { PhotoEnroll } from "@/components/PhotoEnroll";
+import { PhotoBatchEnroll } from "@/components/PhotoBatchEnroll";
 import { formatDateTime, percent } from "@/lib/format";
 import { useCan } from "@/lib/auth-context";
 
@@ -21,6 +23,7 @@ export function EnrollScreen() {
   const [error, setError] = useState<string | null>(null);
   const [createOpen, setCreateOpen] = useState(false);
   const [importOpen, setImportOpen] = useState(false);
+  const [batchOpen, setBatchOpen] = useState(false);
   const [faceTarget, setFaceTarget] = useState<Trainee | null>(null);
 
   function load() {
@@ -55,6 +58,12 @@ export function EnrollScreen() {
                   <Upload className="size-3.5" />
                   CSV取込
                 </Button>
+                {can("enrollment:write") && (
+                  <Button variant="outline" size="sm" className="gap-1.5" onClick={() => setBatchOpen(true)}>
+                    <FolderOpen className="size-3.5" />
+                    フォルダ一括顔登録
+                  </Button>
+                )}
                 <Button size="sm" className="gap-1.5" onClick={() => setCreateOpen(true)}>
                   <Plus className="size-3.5" />
                   受講者を追加
@@ -137,6 +146,13 @@ export function EnrollScreen() {
 
       <CreateTraineeDialog open={createOpen} onOpenChange={setCreateOpen} onCreated={load} />
       <ImportDialog open={importOpen} onOpenChange={setImportOpen} onDone={load} />
+      <PhotoBatchEnroll
+        open={batchOpen}
+        onOpenChange={setBatchOpen}
+        consentPolicyVersion={CONSENT_POLICY_VERSION}
+        consentScope={CONSENT_SCOPE}
+        onDone={load}
+      />
       <FaceEnrollDialog trainee={faceTarget} onClose={() => setFaceTarget(null)} onDone={load} />
     </>
   );
@@ -315,10 +331,12 @@ function FaceEnrollDialog({
   const [error, setError] = useState<string | null>(null);
   const [reasons, setReasons] = useState<string[]>([]);
   const [busy, setBusy] = useState(false);
+  const [mode, setMode] = useState<EnrollMode>("camera");
 
   useEffect(() => {
     if (!trainee) return;
     setConsent(false);
+    setMode("camera");
     setMessage(null);
     setError(null);
     setReasons([]);
@@ -406,7 +424,23 @@ function FaceEnrollDialog({
         )}
 
         {consent ? (
-          <FaceCapture onCapture={handleCapture} captureLabel="撮影して登録" busy={busy} requireLiveness={false} />
+          <div className="space-y-3">
+            <div className="flex gap-1 rounded-xl bg-slate-100 p-1" role="tablist" aria-label="登録方法">
+              <ModeTab active={mode === "camera"} onClick={() => setMode("camera")}>
+                <Camera className="size-3.5" />
+                カメラで撮影
+              </ModeTab>
+              <ModeTab active={mode === "photo"} onClick={() => setMode("photo")}>
+                <ImagePlus className="size-3.5" />
+                画像から登録
+              </ModeTab>
+            </div>
+            {mode === "camera" ? (
+              <FaceCapture onCapture={handleCapture} captureLabel="撮影して登録" busy={busy} requireLiveness={false} />
+            ) : (
+              <PhotoEnroll onCapture={handleCapture} busy={busy} />
+            )}
+          </div>
         ) : (
           <div className="upload-zone">
             <Camera className="size-7 text-cyan-700" />
@@ -445,5 +479,25 @@ function FaceEnrollDialog({
         </DialogFooter>
       </DialogContent>
     </Dialog>
+  );
+}
+
+type EnrollMode = "camera" | "photo";
+
+function ModeTab({
+  active, onClick, children,
+}: { active: boolean; onClick: () => void; children: React.ReactNode }) {
+  return (
+    <button
+      type="button"
+      role="tab"
+      aria-selected={active}
+      onClick={onClick}
+      className={`flex flex-1 items-center justify-center gap-1.5 rounded-lg px-3 py-1.5 text-sm font-bold transition ${
+        active ? "bg-white text-slate-900 shadow-sm" : "text-slate-500 hover:text-slate-700"
+      }`}
+    >
+      {children}
+    </button>
   );
 }

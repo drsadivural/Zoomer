@@ -3,7 +3,7 @@
  * roster reconciliation. The webhook receiver lives in `zoom-webhook.ts`
  * because it must stay outside the authenticated router.
  */
-import { and, eq } from "drizzle-orm";
+import { and, eq, isNull } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/d1";
 import { Hono } from "hono";
 import { z } from "zod";
@@ -471,6 +471,45 @@ export async function reconcileZoomParticipant(
     }
   }
 
+  // 1b. Same Zoom user id within this session?
+  //
+  // The Meeting-SDK bot reports `zoomUserId` on every observation but has no
+  // participant UUID unless Zoom supplies a persistent id, and an attendee who
+  // matches no trainee falls through to the INSERT below. Without this lookup
+  // every observation of an unrecognised attendee created another participant
+  // row — one person appearing on ライブ監視 once per sample. The id is stable
+  // for the duration of a meeting, which is exactly the scope we need it for.
+  if (input.zoomUserId) {
+    const existing = await db
+      .select()
+      .from(sessionParticipants)
+      .where(
+        and(
+          eq(sessionParticipants.sessionId, input.sessionId),
+          eq(sessionParticipants.zoomUserId, input.zoomUserId),
+        ),
+      )
+      .limit(1);
+    if (existing[0]) {
+      await db
+        .update(sessionParticipants)
+        .set({
+          zoomParticipantUuid: input.participantUuid ?? existing[0].zoomParticipantUuid,
+          zoomDisplayName: input.name ?? existing[0].zoomDisplayName,
+          zoomJoinedAt: input.joinedAt ?? existing[0].zoomJoinedAt,
+          zoomLeftAt: input.leftAt ?? existing[0].zoomLeftAt,
+          updatedAt: Date.now(),
+        })
+        .where(eq(sessionParticipants.id, existing[0].id));
+      return {
+        participantId: existing[0].id,
+        traineeId: existing[0].traineeId,
+        updated: true,
+        method: existing[0].matchMethod ?? "unmatched",
+      };
+    }
+  }
+
   const match = await matchParticipantToTrainee(env.DB, input.organizationId, {
     name: input.name,
     email: input.email,
@@ -521,6 +560,43 @@ export async function reconcileZoomParticipant(
         traineeId: match.traineeId,
         updated: true,
         method: match.method,
+      };
+    }
+  }
+
+  // 2b. Last resort before creating a row: an attendee we already recorded
+  //     under the same display name in this session. Mirrors the leave path in
+  //     `zoom-webhook.ts`, and covers a provider that reports neither a UUID
+  //     nor a stable user id.
+  if (!match.traineeId && input.name) {
+    const sameName = await db
+      .select()
+      .from(sessionParticipants)
+      .where(
+        and(
+          eq(sessionParticipants.sessionId, input.sessionId),
+          eq(sessionParticipants.zoomDisplayName, input.name),
+          isNull(sessionParticipants.traineeId),
+        ),
+      )
+      .limit(2);
+    // Two attendees sharing a display name is genuinely ambiguous; record a new
+    // row rather than merging two people into one.
+    if (sameName.length === 1) {
+      await db
+        .update(sessionParticipants)
+        .set({
+          zoomUserId: input.zoomUserId ?? sameName[0].zoomUserId,
+          zoomParticipantUuid: input.participantUuid ?? sameName[0].zoomParticipantUuid,
+          zoomLeftAt: input.leftAt ?? sameName[0].zoomLeftAt,
+          updatedAt: Date.now(),
+        })
+        .where(eq(sessionParticipants.id, sameName[0].id));
+      return {
+        participantId: sameName[0].id,
+        traineeId: null,
+        updated: true,
+        method: sameName[0].matchMethod ?? "unmatched",
       };
     }
   }

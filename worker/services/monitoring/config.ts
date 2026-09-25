@@ -59,6 +59,11 @@ export interface MeetingMonitoringConfig {
   transcriptRetentionDays: number;
 
   alertNotificationsEnabled: boolean;
+
+  /** Create a training session automatically when a Zoom meeting starts (§Zoom bot). */
+  autoSessionEnabled: boolean;
+  /** Allow the recognition bot to join live meetings unattended. */
+  botAutoJoinEnabled: boolean;
 }
 
 /**
@@ -111,6 +116,12 @@ export const DEFAULT_MEETING_CONFIG: MeetingMonitoringConfig = {
   transcriptRetentionDays: 30,
 
   alertNotificationsEnabled: true,
+
+  // On by default: without them, starting a meeting in the connected Zoom
+  // account produces an empty ライブ監視 screen, which reads as a broken
+  // product rather than as a feature nobody switched on.
+  autoSessionEnabled: true,
+  botAutoJoinEnabled: true,
 };
 
 /** Reads an organization's config, falling back to shipped defaults. */

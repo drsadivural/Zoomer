@@ -1,0 +1,7 @@
+# Analysis sidecar dependencies.
+#
+# Installed into the same virtualenv as the UXE engine on this host
+# (/home/ubuntu/uxe-venv), which already provides numpy and opencv.
+mediapipe>=1.0.1
+opencv-python-headless>=4.9
+numpy>=1.26

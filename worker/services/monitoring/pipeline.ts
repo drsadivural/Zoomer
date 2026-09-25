@@ -245,6 +245,9 @@ async function loadLastResolved(
 
 /* ------------------------------------------------------------- write path */
 
+/** Shortest gap between live-tile refreshes, whatever the provider sends. */
+const THUMBNAIL_MIN_INTERVAL_MS = 5_000;
+
 export interface ApplyObservationInput {
   env: Env;
   organizationId: string;
@@ -280,6 +283,14 @@ export async function applyObservation(
   const db = drizzle(env.DB);
   const now = observation.observedAt || Date.now();
 
+  // One JPEG per observation, at most one upload. The live tile and any event
+  // opened by this same observation are the same picture of the same moment, so
+  // uploading it twice would double R2 writes for no benefit.
+  let snapshotPromise: Promise<string | null> | null = null;
+  const storeSnapshotOnce = input.storeSnapshot
+    ? (state: ParticipantState) => (snapshotPromise ??= input.storeSnapshot!(state))
+    : undefined;
+
   const previous = await loadOrCreateState(
     env,
     organizationId,
@@ -304,6 +315,36 @@ export async function applyObservation(
     .insert(participantAnalysisState)
     .values({ ...row, createdAt: now })
     .onConflictDoUpdate({ target: participantAnalysisState.participantId, set: row });
+
+  /* live tile (§21)
+   *
+   * The organizer console shows Ayonix Zoomer's own analysed thumbnail rather
+   * than a copy of the Zoom video stream — a periodic still, never a duplicated
+   * feed. Until this existed, `thumbnail_evidence_id` was written by nothing at
+   * all and every card on ライブ監視 fell back to an initials tile.
+   *
+   * Cadence is the provider's: the bot uploads a frame every
+   * `SNAPSHOT_INTERVAL_SEC`. The floor below is only a guard so a misconfigured
+   * or hostile provider cannot turn the tile into a video stream by sending a
+   * snapshot with every observation.
+   */
+  if (config.snapshotsEnabled && storeSnapshotOnce) {
+    const current = await db
+      .select({ at: participantAnalysisState.thumbnailAt })
+      .from(participantAnalysisState)
+      .where(eq(participantAnalysisState.participantId, participantId))
+      .limit(1);
+    const lastAt = current[0]?.at ?? null;
+    if (lastAt == null || now - lastAt >= THUMBNAIL_MIN_INTERVAL_MS) {
+      const evidenceId = await storeSnapshotOnce(next);
+      if (evidenceId) {
+        await db
+          .update(participantAnalysisState)
+          .set({ thumbnailEvidenceId: evidenceId, thumbnailAt: now })
+          .where(eq(participantAnalysisState.participantId, participantId));
+      }
+    }
+  }
 
   /* observation history (retention-bounded) */
   if (config.observationRetentionDays > 0) {
@@ -369,7 +410,7 @@ export async function applyObservation(
       config,
       now,
       raiseAlert: input.raiseAlert,
-      storeSnapshot: input.storeSnapshot,
+      storeSnapshot: storeSnapshotOnce,
     });
   }
 

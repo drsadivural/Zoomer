@@ -174,6 +174,9 @@ const configSchema = z
     transcriptRetentionDays: z.number().int().min(1).max(3650),
 
     alertNotificationsEnabled: z.boolean(),
+
+    autoSessionEnabled: z.boolean(),
+    botAutoJoinEnabled: z.boolean(),
   })
   .partial();
 
