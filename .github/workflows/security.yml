@@ -82,7 +82,44 @@ jobs:
           # leaked credential, and this project has handled real Zoom secrets.
           fetch-depth: 0
 
-      - name: gitleaks
-        uses: gitleaks/gitleaks-action@v2
+      # Invoked directly rather than through gitleaks/gitleaks-action, which
+      # derives a commit range from the event. On a merge-commit push that
+      # range resolved to nothing: a run reported "no leaks found" having
+      # scanned 0 commits, which is a green check that proves nothing. A full
+      # scan of this repository takes well under a second, so there is no
+      # reason to scan anything less.
+      - name: Install gitleaks
+        run: |
+          curl -sSfL "https://github.com/gitleaks/gitleaks/releases/download/v${GITLEAKS_VERSION}/gitleaks_${GITLEAKS_VERSION}_linux_x64.tar.gz" \
+            | tar -xz -C /usr/local/bin gitleaks
+          gitleaks version
         env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GITLEAKS_VERSION: 8.24.3
+
+      - name: Scan the full history for secrets
+        run: |
+          gitleaks detect --source . --redact -v \
+            --report-format sarif --report-path gitleaks.sarif \
+            --log-level info | tee gitleaks.log
+          # gitleaks exits non-zero on a finding, which should fail the job.
+          exit "${PIPESTATUS[0]}"
+
+      - name: Confirm the scan actually covered the history
+        if: always()
+        run: |
+          # A scan of zero commits is the failure mode this job is guarding
+          # against, and it otherwise looks identical to a clean result.
+          if ! grep -qE "[1-9][0-9]* commits scanned" gitleaks.log; then
+            echo "::error::gitleaks scanned no commits — the scan did not run over the history"
+            exit 1
+          fi
+
+      - name: Upload secret-scan report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: gitleaks-report
+          path: |
+            gitleaks.sarif
+            gitleaks.log
+          retention-days: 90
