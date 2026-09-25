@@ -8,6 +8,11 @@
 # Baseline (passive) by design: it spiders and observes. An active scan sends
 # attack traffic and must never be pointed at production holding biometric data
 # without a scheduled window and the customer's agreement.
+#
+# ZAP is invoked directly rather than through zaproxy/action-baseline: that
+# action still uploads via the retired upload-artifact v3 API, so every run
+# failed at the upload step with "artifact name is not valid" even though the
+# scan itself had completed.
 name: DAST
 
 on:
@@ -27,18 +32,61 @@ jobs:
   zap-baseline:
     name: OWASP ZAP baseline
     runs-on: ubuntu-latest
-    timeout-minutes: 25
+    timeout-minutes: 30
     steps:
-      - uses: actions/checkout@v4
+      - name: Prepare report directory
+        run: |
+          mkdir -p "$GITHUB_WORKSPACE/zap-out"
+          # The ZAP image runs as a non-root user; the bind mount has to be
+          # writable by it or the scan completes and then cannot save a report.
+          chmod 777 "$GITHUB_WORKSPACE/zap-out"
 
-      - name: ZAP baseline scan
-        uses: zaproxy/action-baseline@v0.12.0
+      - name: Run ZAP baseline scan
+        id: scan
+        run: |
+          TARGET="${{ github.event.inputs.target || 'https://zoomer.ayonix.com' }}"
+          echo "Scanning $TARGET"
+          docker run --rm \
+            -v "$GITHUB_WORKSPACE/zap-out:/zap/wrk/:rw" \
+            ghcr.io/zaproxy/zaproxy:stable \
+            zap-baseline.py \
+              -t "$TARGET" \
+              -r zap-report.html \
+              -J zap-report.json \
+              -w zap-report.md \
+              -I -m 5 | tee "$GITHUB_WORKSPACE/zap-out/zap-console.log"
+          # -I already prevents warnings from failing the run; a non-zero exit
+          # here means ZAP itself failed, which should fail the job.
+          exit "${PIPESTATUS[0]}"
+
+      - name: Summarise findings
+        if: always()
+        run: |
+          python3 - <<'PY' >> "$GITHUB_STEP_SUMMARY"
+          import json, os, pathlib
+          p = pathlib.Path(os.environ["GITHUB_WORKSPACE"]) / "zap-out" / "zap-report.json"
+          print("## OWASP ZAP baseline\n")
+          if not p.exists():
+              print("No report produced — the scan did not complete.")
+              raise SystemExit
+          d = json.loads(p.read_text())
+          rows = []
+          for site in d.get("site", []):
+              for a in site.get("alerts", []):
+                  rows.append((a["riskdesc"], a["alert"], len(a.get("instances", []))))
+          if not rows:
+              print("No alerts reported.")
+          else:
+              print("| Risk | Alert | Instances |")
+              print("|---|---|---|")
+              for risk, alert, n in sorted(rows):
+                  print(f"| {risk} | {alert} | {n} |")
+          PY
+
+      - name: Upload ZAP report
+        if: always()
+        uses: actions/upload-artifact@v4
         with:
-          target: ${{ github.event.inputs.target || 'https://zoomer.ayonix.com' }}
-          # -I: report findings but do not fail the job on warnings. Warnings here
-          # are reviewed, not auto-blocking — several are inherent to the stack
-          # (inline styles, no SRI on a web font) and are documented rather than
-          # suppressed silently.
-          cmd_options: "-I -m 5"
-          allow_issue_writing: false
-          artifact_name: zap-baseline-report
+          name: zap-baseline-report
+          path: zap-out/
+          retention-days: 90
