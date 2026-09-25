@@ -14,7 +14,9 @@ export const ENGAGEMENT_LABELS: Record<string, string> = {
   LOOKING_RIGHT: "右を向いている",
   LOOKING_UP: "上を向いている",
   LOOKING_DOWN: "下を向いている",
-  FACE_NOT_VISIBLE: "顔が映っていない",
+  FACE_NOT_VISIBLE: "顔が映っていない（離席の可能性）",
+  EYES_CLOSED: "閉眼（居眠りの疑い）",
+  ANALYSIS_PENDING: "解析待ち",
   CAMERA_OFF: "カメラオフ",
   MULTIPLE_FACES: "複数人を検出",
   IDENTITY_MISMATCH: "本人と不一致",
@@ -29,6 +31,8 @@ export const ENGAGEMENT_TONES: Record<string, Tone> = {
   LOOKING_UP: "warning",
   LOOKING_DOWN: "warning",
   FACE_NOT_VISIBLE: "danger",
+  EYES_CLOSED: "danger",
+  ANALYSIS_PENDING: "neutral",
   CAMERA_OFF: "neutral",
   MULTIPLE_FACES: "danger",
   IDENTITY_MISMATCH: "danger",
@@ -79,6 +83,8 @@ export const EVENT_LABELS: Record<string, string> = {
   IDENTITY_VERIFIED: "本人確認成功",
   LONG_ABSENCE: "長時間の不在",
   LOW_CONFIDENCE: "信頼度が低い",
+  DROWSINESS_SUSPECTED: "居眠りの疑い",
+  EYES_REOPENED: "開眼を確認",
 };
 
 export const TIER_LABELS: Record<string, string> = {
@@ -101,6 +107,8 @@ export const STATE_COLORS: Record<string, string> = {
   LOOKING_UP: "#f59e0b",
   LOOKING_DOWN: "#f59e0b",
   FACE_NOT_VISIBLE: "#ef4444",
+  EYES_CLOSED: "#e11d48",
+  ANALYSIS_PENDING: "#cbd5e1",
   CAMERA_OFF: "#94a3b8",
   MULTIPLE_FACES: "#dc2626",
   IDENTITY_MISMATCH: "#b91c1c",
@@ -108,10 +116,12 @@ export const STATE_COLORS: Record<string, string> = {
   UNKNOWN: "#cbd5e1",
 };
 
+/** States the organizer must look at. These drive the red treatment on the grid. */
 const ATTENTION = new Set([
   "IDENTITY_MISMATCH",
   "MULTIPLE_FACES",
   "FACE_NOT_VISIBLE",
+  "EYES_CLOSED",
   "CAMERA_OFF",
 ]);
 
@@ -133,12 +143,14 @@ const RISK: Record<string, number> = {
   IDENTITY_MISMATCH: 100,
   MULTIPLE_FACES: 90,
   FACE_NOT_VISIBLE: 80,
+  EYES_CLOSED: 75,
   CAMERA_OFF: 70,
   LOOKING_DOWN: 40,
   LOOKING_LEFT: 40,
   LOOKING_RIGHT: 40,
   LOOKING_UP: 40,
   LOW_CONFIDENCE: 30,
+  ANALYSIS_PENDING: 25,
   UNKNOWN: 20,
   SCREEN_FACING: 0,
 };

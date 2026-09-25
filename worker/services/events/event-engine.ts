@@ -77,6 +77,10 @@ function describe(type: EngagementEventType, state: ParticipantState, durationMs
       return `${state.faceCount}名の顔を検出しています（${s}秒継続）`;
     case "IDENTITY_MISMATCH":
       return `登録された本人と一致しません（一致度 ${((state.identityConfidence ?? 0) * 100).toFixed(1)}%）`;
+    case "DROWSINESS_SUSPECTED":
+      return `閉眼が ${s}秒 継続しています（居眠りの疑い・要確認）`;
+    case "EYES_REOPENED":
+      return "開眼を確認しました";
     case "LOW_CONFIDENCE":
       return `解析の信頼度が低い状態が ${s}秒 継続しています`;
     case "IDENTITY_VERIFIED":
@@ -101,6 +105,10 @@ const ESCALATES: readonly EngagementEventType[] = [
   "IDENTITY_MISMATCH",
   "MULTIPLE_FACES",
   "LONG_ABSENCE",
+  // Raised as a WARNING-severity alert, matching how the trainee-side pipeline
+  // has always handled 居眠り疑い: visible to the organizer, never an automatic
+  // judgement about the person.
+  "DROWSINESS_SUSPECTED",
 ];
 
 /**
@@ -219,6 +227,7 @@ export function needsAttention(state: EngagementState): boolean {
     state === "IDENTITY_MISMATCH" ||
     state === "MULTIPLE_FACES" ||
     state === "FACE_NOT_VISIBLE" ||
+    state === "EYES_CLOSED" ||
     state === "CAMERA_OFF"
   );
 }

@@ -4,7 +4,7 @@
  * Ordered to answer §47's question first: "who needs my attention?" is the
  * leftmost card and the only one that turns red.
  */
-import { AlertTriangle, Camera, Eye, ShieldAlert, UserCheck, Users, Volume2 } from "lucide-react";
+import { AlertTriangle, Camera, Eye, EyeOff, ShieldAlert, Users, Volume2 } from "lucide-react";
 import type { MeetingAnalysisResponse, MeetingKpis } from "@/lib/api";
 import { AppCard, IconTile } from "@/components/shell/primitives";
 import { formatClock } from "@/lib/format";
@@ -105,16 +105,30 @@ export function MeetingStatusStrip({
 
 export function MeetingKPIs({ kpis }: { kpis: MeetingKpis }) {
   return (
-    <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-6">
+    <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-7">
       <Tile
         label="要対応"
         value={kpis.needsAttention}
-        hint="不一致・複数人・顔なし・カメラオフ"
+        hint="不一致・複数人・顔なし・閉眼・カメラオフ"
         color="amber"
         icon={<AlertTriangle />}
         urgent={kpis.needsAttention > 0}
       />
-      <Tile label="参加者" value={kpis.participants} hint={`在席 ${kpis.present}名`} color="blue" icon={<Users />} />
+      <Tile
+        label="閉眼・離席"
+        value={kpis.eyesClosed + kpis.faceMissing}
+        hint={`居眠り疑い ${kpis.eyesClosed}名 ・ 顔なし ${kpis.faceMissing}名`}
+        color="amber"
+        icon={<EyeOff />}
+        urgent={kpis.eyesClosed + kpis.faceMissing > 0}
+      />
+      <Tile
+        label="参加者"
+        value={kpis.participants}
+        hint={`在席 ${kpis.present}名${kpis.pending ? ` ・ 解析待ち ${kpis.pending}名` : ""}`}
+        color="blue"
+        icon={<Users />}
+      />
       <Tile label="カメラON" value={kpis.cameraOn} hint={`全 ${kpis.present}名中`} color="cyan" icon={<Camera />} />
       <Tile
         label="画面正対"
@@ -129,7 +143,7 @@ export function MeetingKPIs({ kpis }: { kpis: MeetingKpis }) {
         value={kpis.alerts}
         hint={`発話中 ${kpis.speaking}名`}
         color="blue"
-        icon={kpis.speaking > 0 ? <Volume2 /> : <UserCheck />}
+        icon={<Volume2 />}
       />
     </div>
   );

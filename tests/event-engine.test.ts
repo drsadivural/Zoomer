@@ -246,3 +246,88 @@ describe("attention", () => {
     expect(needsAttention("LOOKING_DOWN")).toBe(false);
   });
 });
+
+/**
+ * Drowsiness. The product has always treated closed eyes as a *suspicion* for a
+ * human to confirm rather than a finding about the person, and that framing is
+ * now a published privacy commitment — so the severity is asserted here, not
+ * just the detection.
+ */
+describe("drowsiness", () => {
+  it("ignores ordinary blinking", () => {
+    const actions = evaluateParticipant({
+      state: stateIn("EYES_CLOSED", 1),
+      openEvents: [],
+      config,
+      now: T0,
+    });
+    expect(actions).toEqual([]);
+  });
+
+  it("raises a suspicion once the eyes stay shut past the gate", () => {
+    const actions = evaluateParticipant({
+      state: stateIn("EYES_CLOSED", config.eyesClosedSec + 2),
+      openEvents: [],
+      config,
+      now: T0,
+    });
+    expect(actions).toHaveLength(1);
+    expect(actions[0]).toMatchObject({ kind: "OPEN", type: "DROWSINESS_SUSPECTED" });
+  });
+
+  it("never rates it ALERT — it must not read as a finding about the person", () => {
+    const actions = evaluateParticipant({
+      state: stateIn("EYES_CLOSED", config.eyesClosedSec + 2),
+      openEvents: [],
+      config,
+      now: T0,
+    });
+    expect(actions[0].kind === "OPEN" && actions[0].severity).toBe("WARNING");
+  });
+
+  it("still reaches the organizer's alert inbox despite being a WARNING", () => {
+    const actions = evaluateParticipant({
+      state: stateIn("EYES_CLOSED", config.eyesClosedSec + 2),
+      openEvents: [],
+      config,
+      now: T0,
+    });
+    expect(actions[0].kind === "OPEN" && actions[0].escalate).toBe(true);
+  });
+
+  it("calls it a suspicion, not a conclusion", () => {
+    const actions = evaluateParticipant({
+      state: stateIn("EYES_CLOSED", config.eyesClosedSec + 2),
+      openEvents: [],
+      config,
+      now: T0,
+    });
+    const detail = actions[0].kind === "OPEN" ? actions[0].detail : "";
+    expect(detail).toContain("疑い");
+    expect(detail).not.toContain("居眠りしています");
+  });
+
+  it("resolves when the eyes reopen", () => {
+    const actions = evaluateParticipant({
+      state: stateIn("SCREEN_FACING", 2),
+      openEvents: [open("DROWSINESS_SUSPECTED", T0 - 40_000)],
+      config,
+      now: T0,
+    });
+    expect(actions[0]).toMatchObject({ kind: "RESOLVE", type: "DROWSINESS_SUSPECTED", durationMs: 40_000 });
+  });
+
+  it("raises nothing when drowsiness detection is switched off", () => {
+    const actions = evaluateParticipant({
+      state: stateIn("EYES_CLOSED", 600),
+      openEvents: [],
+      config: { ...config, drowsinessEnabled: false },
+      now: T0,
+    });
+    expect(actions.filter((a) => a.kind === "OPEN")).toHaveLength(0);
+  });
+
+  it("counts as needing the organizer's attention", () => {
+    expect(needsAttention("EYES_CLOSED")).toBe(true);
+  });
+});

@@ -600,6 +600,7 @@ export interface MeetingMonitoringConfig {
   screenFacingEnabled: boolean;
   headPoseEnabled: boolean;
   multiFaceEnabled: boolean;
+  drowsinessEnabled: boolean;
   participationAnalyticsEnabled: boolean;
   transcriptEnabled: boolean;
   normalFps: number;
@@ -615,6 +616,7 @@ export interface MeetingMonitoringConfig {
   cameraOffSec: number;
   multiFaceSec: number;
   longAbsenceSec: number;
+  eyesClosedSec: number;
   identityConfidenceThreshold: number;
   identityCacheSec: number;
   screenFacingThreshold: number;
@@ -655,6 +657,9 @@ export interface MeetingKpis {
   cameraOn: number;
   screenFacing: number;
   lookingAway: number;
+  eyesClosed: number;
+  faceMissing: number;
+  pending: number;
   unverified: number;
   needsAttention: number;
   speaking: number;
@@ -703,6 +708,9 @@ export interface MeetingParticipant {
   headPitch: number | null;
   headRoll: number | null;
   headState: string;
+  eyeClosed: boolean;
+  eyeOpenness: number | null;
+  eyesClosedSince: number | null;
   screenFacingProbability: number | null;
   currentState: string;
   currentStateSince: number;

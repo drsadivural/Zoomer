@@ -11,7 +11,9 @@
  * 50 video feeds.
  */
 import { memo, useEffect, useState } from "react";
-import { Camera, CameraOff, Mic, MicOff, ShieldAlert, ShieldCheck, Users, Volume2 } from "lucide-react";
+import {
+  AlertTriangle, Camera, CameraOff, EyeOff, Mic, MicOff, ShieldAlert, ShieldCheck, Users, Volume2,
+} from "lucide-react";
 import { api, type MeetingParticipant } from "@/lib/api";
 import { StatusBadge } from "@/components/shell/primitives";
 import {
@@ -70,6 +72,7 @@ export interface ParticipantCardProps {
 function Card({ participant: p, now, onOpen, canViewEvidence }: ParticipantCardProps) {
   const name = p.traineeName ?? p.displayName ?? "未照合の参加者";
   const attention = needsAttention(p.currentState) || p.identityStatus === "MISMATCH";
+  const alertLabel = ENGAGEMENT_LABELS[p.currentState] ?? p.currentState;
   const thumbnail = useThumbnail(p.thumbnailEvidenceId, canViewEvidence);
   const tone =
     p.identityStatus === "MISMATCH" || p.currentState === "MULTIPLE_FACES"
@@ -84,7 +87,7 @@ function Card({ participant: p, now, onOpen, canViewEvidence }: ParticipantCardP
       onClick={() => onOpen(p.participantId)}
       aria-label={`${name} の詳細を開く`}
       className={`group flex w-full flex-col overflow-hidden rounded-2xl border bg-white text-left shadow-sm transition hover:shadow-md focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-cyan-500 ${
-        attention ? "border-rose-300 ring-1 ring-rose-200" : "border-slate-200"
+        attention ? "border-rose-500 ring-2 ring-rose-400/60 shadow-rose-100" : "border-slate-200"
       } ${p.leftAt ? "opacity-60" : ""}`}
     >
       <div className="relative aspect-[4/3] w-full overflow-hidden bg-slate-100">
@@ -126,6 +129,14 @@ function Card({ participant: p, now, onOpen, canViewEvidence }: ParticipantCardP
           <span className="grid size-6 place-items-center rounded-md bg-white/90 text-slate-600">
             {p.cameraOn ? <Camera className="size-3.5" /> : <CameraOff className="size-3.5 text-slate-400" />}
           </span>
+          {p.eyeClosed && (
+            <span
+              className="grid size-6 place-items-center rounded-md bg-rose-600 text-white"
+              title="閉眼を検出"
+            >
+              <EyeOff className="size-3.5" />
+            </span>
+          )}
           <span className="grid size-6 place-items-center rounded-md bg-white/90 text-slate-600">
             {p.speaking ? (
               <Volume2 className="size-3.5 text-emerald-600" />
@@ -136,6 +147,13 @@ function Card({ participant: p, now, onOpen, canViewEvidence }: ParticipantCardP
             )}
           </span>
         </div>
+
+        {attention && !p.leftAt && (
+          <div className="absolute inset-x-0 bottom-0 flex items-center justify-center gap-1 bg-rose-600/95 py-1 text-[0.68rem] font-bold text-white">
+            <AlertTriangle className="size-3" />
+            {alertLabel}
+          </div>
+        )}
 
         {p.leftAt && (
           <div className="absolute inset-x-0 bottom-0 bg-slate-900/70 py-1 text-center text-[0.65rem] font-bold text-white">
@@ -213,6 +231,8 @@ export const ParticipantCard = memo(Card, (a, b) => {
     p.speaking === q.speaking &&
     p.faceCount === q.faceCount &&
     p.faceDetected === q.faceDetected &&
+    p.eyeClosed === q.eyeClosed &&
+    p.eyeOpenness === q.eyeOpenness &&
     p.screenFacingProbability === q.screenFacingProbability &&
     p.lastAnalyzedAt === q.lastAnalyzedAt &&
     p.analysisTier === q.analysisTier &&

@@ -21,7 +21,14 @@ export const ENGAGEMENT_STATES = [
   "CAMERA_OFF",
   "MULTIPLE_FACES",
   "IDENTITY_MISMATCH",
+  // Eyes closed for a sustained period. Reported as a *suspicion* requiring a
+  // human to confirm, never as a finding about the person — the product does
+  // not claim to know whether someone is asleep, only that their eyes were
+  // closed (PRODUCT_SPEC_JA.md §3.4).
+  "EYES_CLOSED",
   "LOW_CONFIDENCE",
+  // A Zoom attendee we know about but have no analysis for yet.
+  "ANALYSIS_PENDING",
   "UNKNOWN",
 ] as const;
 
@@ -61,6 +68,8 @@ export const ENGAGEMENT_EVENT_TYPES = [
   "IDENTITY_VERIFIED",
   "LONG_ABSENCE",
   "LOW_CONFIDENCE",
+  "DROWSINESS_SUSPECTED",
+  "EYES_REOPENED",
 ] as const;
 export type EngagementEventType = (typeof ENGAGEMENT_EVENT_TYPES)[number];
 
@@ -71,6 +80,7 @@ export const ATTENTION_STATES: readonly EngagementState[] = [
   "IDENTITY_MISMATCH",
   "MULTIPLE_FACES",
   "FACE_NOT_VISIBLE",
+  "EYES_CLOSED",
   "CAMERA_OFF",
 ];
 
@@ -96,12 +106,14 @@ const STATE_RISK: Record<EngagementState, number> = {
   IDENTITY_MISMATCH: 100,
   MULTIPLE_FACES: 90,
   FACE_NOT_VISIBLE: 80,
+  EYES_CLOSED: 75,
   CAMERA_OFF: 70,
   LOOKING_DOWN: 40,
   LOOKING_LEFT: 40,
   LOOKING_RIGHT: 40,
   LOOKING_UP: 40,
   LOW_CONFIDENCE: 30,
+  ANALYSIS_PENDING: 25,
   UNKNOWN: 20,
   SCREEN_FACING: 0,
 };
@@ -126,6 +138,12 @@ export function identityRisk(status: IdentityStatus): number {
 
 /** Severity an engagement event carries when it opens. */
 const EVENT_SEVERITY: Record<EngagementEventType, Severity> = {
+  // Deliberately WARNING, not ALERT, and deliberately named "suspected":
+  // eyes being shut is not proof that somebody is asleep, and this signal must
+  // never by itself fail a trainee. It is shown prominently so an organizer
+  // looks — the judgement stays with the human.
+  DROWSINESS_SUSPECTED: "WARNING",
+  EYES_REOPENED: "INFO",
   IDENTITY_MISMATCH: "ALERT",
   MULTIPLE_FACES: "ALERT",
   LONG_ABSENCE: "ALERT",
@@ -147,6 +165,7 @@ export function eventSeverity(type: EngagementEventType): Severity {
 
 /** Events that close an earlier open event rather than opening a new concern. */
 const RESOLVING: Partial<Record<EngagementEventType, EngagementEventType>> = {
+  EYES_REOPENED: "DROWSINESS_SUSPECTED",
   FACE_RETURNED: "FACE_MISSING",
   SCREEN_FACING_RETURNED: "SCREEN_AWAY",
   CAMERA_ON: "CAMERA_OFF",

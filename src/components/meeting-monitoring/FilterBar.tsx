@@ -14,6 +14,7 @@ export type ParticipantFilter =
   | "screen-facing"
   | "looking-away"
   | "face-missing"
+  | "eyes-closed"
   | "camera-off"
   | "multiple-faces"
   | "unverified"
@@ -28,6 +29,7 @@ export const FILTERS: { id: ParticipantFilter; label: string }[] = [
   { id: "screen-facing", label: "画面正対" },
   { id: "looking-away", label: "視線が外れている" },
   { id: "face-missing", label: "顔が映っていない" },
+  { id: "eyes-closed", label: "閉眼・居眠り疑い" },
   { id: "camera-off", label: "カメラオフ" },
   { id: "multiple-faces", label: "複数人" },
   { id: "unverified", label: "本人未確認" },
@@ -54,6 +56,8 @@ export function matchesFilter(p: MeetingParticipant, filter: ParticipantFilter):
       return isLookingAway(p.currentState);
     case "face-missing":
       return p.currentState === "FACE_NOT_VISIBLE";
+    case "eyes-closed":
+      return p.currentState === "EYES_CLOSED" || p.eyeClosed === true;
     case "camera-off":
       return !p.cameraOn;
     case "multiple-faces":

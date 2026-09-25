@@ -220,7 +220,7 @@ export function LiveMeetingScreen() {
             <AppCard className="border-rose-200 bg-rose-50/40">
               <CardHead
                 title={`対応が必要な参加者 ${attention.length}名`}
-                description="本人不一致・複数人検出・顔が映っていない・カメラオフを優先表示しています"
+                description="本人不一致・複数人検出・顔が映っていない（離席）・閉眼（居眠りの疑い）・カメラオフを優先表示しています"
               />
               <div className="flex flex-wrap gap-2 px-5 pb-4">
                 {attention.map((p) => (

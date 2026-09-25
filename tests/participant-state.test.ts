@@ -248,3 +248,51 @@ describe("observation merging", () => {
     expect(state.microphoneOn).toBe(true);
   });
 });
+
+describe("eye state", () => {
+  it("derives EYES_CLOSED from a closed-eye observation", () => {
+    expect(deriveObservedState(observation(T0, { eyeClosed: true }), config, 0.95)).toBe("EYES_CLOSED");
+  });
+
+  it("ranks a missing face above closed eyes — no face means nothing to judge", () => {
+    expect(
+      deriveObservedState(observation(T0, { eyeClosed: true, faceDetected: false, faceCount: 0 }), config, 0),
+    ).toBe("FACE_NOT_VISIBLE");
+  });
+
+  it("ranks an identity mismatch above closed eyes", () => {
+    expect(
+      deriveObservedState(observation(T0, { eyeClosed: true, identityStatus: "MISMATCH" }), config, 0.9),
+    ).toBe("IDENTITY_MISMATCH");
+  });
+
+  it("treats 'not measured' as different from 'eyes open'", () => {
+    // An absent eyeClosed must not be read as false and silently clear a
+    // closed-eye run recorded by an earlier, better observation.
+    let state = emptyParticipantState("sp_1", "ses_1", T0);
+    state = reduceParticipantState(state, observation(T0, { eyeClosed: true }), config, T0).next;
+    expect(state.eyeClosed).toBe(true);
+    state = reduceParticipantState(state, observation(T0 + 1000, { eyeClosed: null }), config, T0 + 1000).next;
+    expect(state.eyeClosed).toBe(true);
+  });
+
+  it("tracks when the closed run began, and clears it on reopening", () => {
+    let state = emptyParticipantState("sp_1", "ses_1", T0);
+    state = reduceParticipantState(state, observation(T0, { eyeClosed: true }), config, T0).next;
+    expect(state.eyesClosedSince).toBe(T0);
+
+    // The run start must not move while the eyes stay shut, or a long closure
+    // would look perpetually fresh and never reach the gate.
+    state = reduceParticipantState(state, observation(T0 + 5000, { eyeClosed: true }), config, T0 + 5000).next;
+    expect(state.eyesClosedSince).toBe(T0);
+
+    state = reduceParticipantState(state, observation(T0 + 9000, { eyeClosed: false }), config, T0 + 9000).next;
+    expect(state.eyesClosedSince).toBeNull();
+    expect(state.eyeClosed).toBe(false);
+  });
+
+  it("honours the drowsiness feature flag", () => {
+    const off = { ...config, drowsinessEnabled: false };
+    expect(deriveObservedState(observation(T0, { eyeClosed: true }), off, 0.95)).toBe("SCREEN_FACING");
+  });
+});

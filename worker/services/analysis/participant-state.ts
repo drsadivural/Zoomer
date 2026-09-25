@@ -29,6 +29,10 @@ export interface AnalysisObservation {
   pose?: Partial<HeadPose> | null;
   gazeHorizontal?: number | null;
   gazeVertical?: number | null;
+  /** True when the provider judged the eyes shut in this frame. */
+  eyeClosed?: boolean | null;
+  /** 0..1 eye openness, higher is more open. Null if not measurable. */
+  eyeOpenness?: number | null;
   identityStatus?: IdentityStatus | null;
   identityConfidence?: number | null;
   identityTraineeId?: string | null;
@@ -68,6 +72,11 @@ export interface ParticipantState {
   headPitch: number | null;
   headRoll: number | null;
   headState: ReturnType<typeof headState>;
+
+  eyeClosed: boolean;
+  eyeOpenness: number | null;
+  /** Start of the current unbroken run of closed eyes; null when open. */
+  eyesClosedSince: number | null;
 
   screenFacingProbability: number | null;
   gazeHorizontal: number | null;
@@ -114,6 +123,9 @@ export function emptyParticipantState(
     headPitch: null,
     headRoll: null,
     headState: "UNKNOWN",
+    eyeClosed: false,
+    eyeOpenness: null,
+    eyesClosedSince: null,
     screenFacingProbability: null,
     gazeHorizontal: null,
     gazeVertical: null,
@@ -156,6 +168,10 @@ export function deriveObservedState(
   }
   if (config.multiFaceEnabled && observation.faceCount >= 2) return "MULTIPLE_FACES";
   if (!observation.faceDetected) return "FACE_NOT_VISIBLE";
+
+  // A face that is present but with closed eyes outranks head direction: the
+  // organizer needs to know about it, and "looking down" would understate it.
+  if (config.drowsinessEnabled && observation.eyeClosed === true) return "EYES_CLOSED";
 
   const confidence = observation.detectionConfidence ?? 1;
   if (confidence < config.lowConfidenceThreshold) return "LOW_CONFIDENCE";
@@ -252,6 +268,16 @@ export function reduceParticipantState(
     commit(observed, pendingStateSince ?? now);
   }
 
+  // Eye state: keep the start of the current closed run so the event engine can
+  // measure how long the eyes have actually been shut, independent of when the
+  // engagement state was committed.
+  const eyeClosed = observation.eyeClosed ?? previous.eyeClosed;
+  const eyesClosedSince = !eyeClosed
+    ? null
+    : previous.eyeClosed && previous.eyesClosedSince != null
+      ? previous.eyesClosedSince
+      : now;
+
   const wasSpeaking = previous.speaking;
   const speaking = observation.speaking ?? previous.speaking;
   const startedSpeaking = Boolean(config.participationAnalyticsEnabled && speaking && !wasSpeaking);
@@ -283,6 +309,10 @@ export function reduceParticipantState(
     headPitch: pose?.pitch ?? previous.headPitch,
     headRoll: pose?.roll ?? previous.headRoll,
     headState: config.headPoseEnabled ? headState(pose, config) : previous.headState,
+
+    eyeClosed,
+    eyeOpenness: observation.eyeOpenness ?? previous.eyeOpenness,
+    eyesClosedSince,
 
     screenFacingProbability: facing?.screenFacingProbability ?? previous.screenFacingProbability,
     gazeHorizontal: facing?.gazeHorizontal ?? previous.gazeHorizontal,

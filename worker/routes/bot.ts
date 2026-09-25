@@ -297,6 +297,12 @@ const observationSchema = z.object({
   gazeHorizontal: z.number().min(-1).max(1).nullable().optional(),
   gazeVertical: z.number().min(-1).max(1).nullable().optional(),
 
+  /** Eye state, when the provider can measure it (MediaPipe eyeBlink, or an
+   *  equivalent from the UXE engine). Absent means "not measured", which is
+   *  different from "eyes open" and is treated as such downstream. */
+  eyeClosed: z.boolean().nullable().optional(),
+  eyeOpenness: z.number().min(0).max(1).nullable().optional(),
+
   identityStatus: z
     .enum(["VERIFIED", "UNVERIFIED", "MISMATCH", "NO_FACE", "MULTIPLE_FACES", "LOW_CONFIDENCE", "UNKNOWN"])
     .optional(),
@@ -401,6 +407,8 @@ app.post("/observe", async (c) => {
             : null,
         gazeHorizontal: o.gazeHorizontal ?? null,
         gazeVertical: o.gazeVertical ?? null,
+        eyeClosed: o.eyeClosed ?? null,
+        eyeOpenness: o.eyeOpenness ?? null,
         identityStatus: o.identityStatus ?? null,
         identityConfidence: o.identityConfidence ?? null,
         identityTraineeId: o.traineeId ?? null,

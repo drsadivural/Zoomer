@@ -28,6 +28,7 @@ const FEATURES: { key: BooleanKey; label: string; hint: string }[] = [
   { key: "screenFacingEnabled", label: "画面正対の解析", hint: "視線・顔の向きから画面正対度を推定します" },
   { key: "headPoseEnabled", label: "頭部姿勢の解析", hint: "ヨー・ピッチ・ロールを算出します" },
   { key: "multiFaceEnabled", label: "複数人検出", hint: "1つの映像内に複数の顔がある場合に検知します" },
+  { key: "drowsinessEnabled", label: "閉眼・居眠り疑いの検知", hint: "閉眼の継続を検知します。あくまで「疑い」であり、自動判定はしません" },
   { key: "participationAnalyticsEnabled", label: "参加状況の集計", hint: "発話時間・発話回数を集計します" },
   { key: "transcriptEnabled", label: "文字起こし解析", hint: "Zoomの文字起こしが利用可能な場合のみ（任意）" },
 ];
@@ -168,6 +169,7 @@ export function MeetingMonitoringSettingsCard() {
               {num("cameraOffSec", "カメラオフ判定（秒）", "カメラがオフのまま継続した秒数", 5, 3600)}
               {num("multiFaceSec", "複数人検出の判定（秒）", "通行人などの一瞬の写り込みを除外します", 1, 300)}
               {num("longAbsenceSec", "長時間不在の判定（秒）", "この秒数を超えると重大イベントとして扱います", 30, 7200)}
+              {num("eyesClosedSec", "閉眼の判定（秒）", "通常のまばたきを除外するため、この秒数の継続で「居眠りの疑い」とします", 3, 300)}
               {num("yawThresholdDeg", "左右方向のしきい値（度）", "これを超えると左右を向いていると判定します", 5, 80)}
               {num("pitchUpThresholdDeg", "上方向のしきい値（度）", "これを超えると上を向いていると判定します", 5, 80)}
               {num("pitchDownThresholdDeg", "下方向のしきい値（度）", "手元・スマートフォンを見る動作の判定に影響します", 5, 80)}

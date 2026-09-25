@@ -72,6 +72,12 @@ export function gateForState(
       // Immediate by design: an organizer must not learn about a possible
       // impersonation 30 seconds late.
       return { type: "IDENTITY_MISMATCH", gateSec: 0, requires: "identityVerificationEnabled" };
+    case "EYES_CLOSED":
+      return {
+        type: "DROWSINESS_SUSPECTED",
+        gateSec: config.eyesClosedSec,
+        requires: "drowsinessEnabled",
+      };
     case "LOW_CONFIDENCE":
       return { type: "LOW_CONFIDENCE", gateSec: config.temporarySec };
     case "LOOKING_LEFT":

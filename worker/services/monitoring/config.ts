@@ -18,6 +18,7 @@ export interface MeetingMonitoringConfig {
   screenFacingEnabled: boolean;
   headPoseEnabled: boolean;
   multiFaceEnabled: boolean;
+  drowsinessEnabled: boolean;
   participationAnalyticsEnabled: boolean;
   transcriptEnabled: boolean;
 
@@ -39,6 +40,8 @@ export interface MeetingMonitoringConfig {
   cameraOffSec: number;
   multiFaceSec: number;
   longAbsenceSec: number;
+  /** Eyes must stay closed this long before drowsiness is suspected. */
+  eyesClosedSec: number;
 
   identityConfidenceThreshold: number;
   identityCacheSec: number;
@@ -71,6 +74,7 @@ export const DEFAULT_MEETING_CONFIG: MeetingMonitoringConfig = {
   screenFacingEnabled: true,
   headPoseEnabled: true,
   multiFaceEnabled: true,
+  drowsinessEnabled: true,
   participationAnalyticsEnabled: true,
   transcriptEnabled: false,
 
@@ -89,6 +93,7 @@ export const DEFAULT_MEETING_CONFIG: MeetingMonitoringConfig = {
   cameraOffSec: 60,
   multiFaceSec: 5,
   longAbsenceSec: 300,
+  eyesClosedSec: 10,
 
   identityConfidenceThreshold: 0.82,
   identityCacheSec: 600,

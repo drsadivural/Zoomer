@@ -60,6 +60,7 @@ import { upsertAlert } from "./trainee";
 
 /** Fixed so a simulation run reproduces exactly when replayed. */
 const DEFAULT_SIMULATION_SEED = 20260924;
+const DEFAULT_SIMULATION_PARTICIPANTS = 12;
 
 const app = new Hono<{ Bindings: Env; Variables: Variables }>();
 app.use("*", requireAuth);
@@ -136,6 +137,7 @@ const configSchema = z
     screenFacingEnabled: z.boolean(),
     headPoseEnabled: z.boolean(),
     multiFaceEnabled: z.boolean(),
+    drowsinessEnabled: z.boolean(),
     participationAnalyticsEnabled: z.boolean(),
     transcriptEnabled: z.boolean(),
 
@@ -154,6 +156,7 @@ const configSchema = z
     cameraOffSec: z.number().int().min(5).max(3600),
     multiFaceSec: z.number().int().min(1).max(300),
     longAbsenceSec: z.number().int().min(30).max(7200),
+    eyesClosedSec: z.number().int().min(3).max(300),
 
     identityConfidenceThreshold: z.number().min(0.5).max(0.999),
     identityCacheSec: z.number().int().min(30).max(7200),
@@ -258,8 +261,11 @@ app.post("/:id/analysis/start", requirePermission("monitoring:write"), async (c)
     status: "RUNNING",
     config: {
       ...(config as unknown as Record<string, number | boolean | string>),
-      participantCount: body.participantCount ?? 0,
-      seed: body.seed ?? 0,
+      // Concrete values, never 0-as-"unset": `0 ?? default` keeps the 0, which
+      // silently gave the simulator a different seed on a later run and so
+      // generated a second copy of every synthetic participant.
+      participantCount: body.participantCount ?? DEFAULT_SIMULATION_PARTICIPANTS,
+      seed: body.seed ?? DEFAULT_SIMULATION_SEED,
     },
     startedAt: now,
     startedBy: actor.userId,
@@ -320,13 +326,26 @@ app.get("/:id/analysis", requirePermission("monitoring:read"), async (c) => {
   const run = await currentRun(c.env, actor.organizationId, session.id);
   const config = await getMeetingConfig(c.env.DB, actor.organizationId);
 
+  // Counted over the Zoom roster, left-joined to analysis, so the KPI total and
+  // the grid always agree — including attendees still awaiting a first analysis.
   const states = await db
-    .select()
-    .from(participantAnalysisState)
+    .select({
+      leftAt: sql<number | null>`coalesce(${participantAnalysisState.leftAt}, ${sessionParticipants.zoomLeftAt})`,
+      cameraOn: sql<number>`coalesce(${participantAnalysisState.cameraOn}, 0)`,
+      speaking: sql<number>`coalesce(${participantAnalysisState.speaking}, 0)`,
+      identityStatus: sql<string>`coalesce(${participantAnalysisState.identityStatus}, 'UNKNOWN')`,
+      currentState: sql<string>`coalesce(${participantAnalysisState.currentState}, 'ANALYSIS_PENDING')`,
+      analysed: sql<number>`(case when ${participantAnalysisState.participantId} is null then 0 else 1 end)`,
+    })
+    .from(sessionParticipants)
+    .leftJoin(
+      participantAnalysisState,
+      eq(participantAnalysisState.participantId, sessionParticipants.id),
+    )
     .where(
       and(
-        eq(participantAnalysisState.organizationId, actor.organizationId),
-        eq(participantAnalysisState.sessionId, session.id),
+        eq(sessionParticipants.organizationId, actor.organizationId),
+        eq(sessionParticipants.sessionId, session.id),
       ),
     );
 
@@ -345,12 +364,15 @@ app.get("/:id/analysis", requirePermission("monitoring:read"), async (c) => {
   const kpis = {
     participants: states.length,
     present: present.length,
-    cameraOn: present.filter((s) => s.cameraOn).length,
+    cameraOn: present.filter((s) => Boolean(s.cameraOn)).length,
     screenFacing: present.filter((s) => s.currentState === "SCREEN_FACING").length,
     lookingAway: present.filter((s) => isLookingAway(s.currentState as never)).length,
+    eyesClosed: present.filter((s) => s.currentState === "EYES_CLOSED").length,
+    faceMissing: present.filter((s) => s.currentState === "FACE_NOT_VISIBLE").length,
+    pending: present.filter((s) => !s.analysed).length,
     unverified: present.filter((s) => s.identityStatus !== "VERIFIED").length,
     needsAttention: present.filter((s) => needsAttention(s.currentState as never)).length,
-    speaking: present.filter((s) => s.speaking).length,
+    speaking: present.filter((s) => Boolean(s.speaking)).length,
     alerts: Number(openEvents[0]?.count ?? 0),
   };
 
@@ -436,33 +458,41 @@ app.get("/:id/participants", requirePermission("monitoring:read"), async (c) => 
   const limit = Math.min(Number(c.req.query("limit") ?? 200), 500);
   const offset = Math.max(Number(c.req.query("offset") ?? 0), 0);
 
+  // Driven from `session_participants`, NOT from the analysis table: a Zoom
+  // attendee the roster knows about but the engine has not looked at yet must
+  // still appear in the grid, marked ANALYSIS_PENDING. Reading the analysis
+  // table first made those people invisible, which is the opposite of what a
+  // live roster is for.
   const rows = await db
     .select({
-      participantId: participantAnalysisState.participantId,
-      sessionId: participantAnalysisState.sessionId,
-      displayName: participantAnalysisState.displayName,
-      joinedAt: participantAnalysisState.joinedAt,
-      leftAt: participantAnalysisState.leftAt,
-      cameraOn: participantAnalysisState.cameraOn,
-      microphoneOn: participantAnalysisState.microphoneOn,
-      speaking: participantAnalysisState.speaking,
-      speakingMs: participantAnalysisState.speakingMs,
-      speakingTurns: participantAnalysisState.speakingTurns,
-      faceDetected: participantAnalysisState.faceDetected,
-      faceCount: participantAnalysisState.faceCount,
+      participantId: sessionParticipants.id,
+      sessionId: sessionParticipants.sessionId,
+      displayName: sql<string | null>`coalesce(${participantAnalysisState.displayName}, ${sessionParticipants.zoomDisplayName})`,
+      joinedAt: sql<number | null>`coalesce(${participantAnalysisState.joinedAt}, ${sessionParticipants.zoomJoinedAt})`,
+      leftAt: sql<number | null>`coalesce(${participantAnalysisState.leftAt}, ${sessionParticipants.zoomLeftAt})`,
+      cameraOn: sql<boolean>`coalesce(${participantAnalysisState.cameraOn}, 0)`,
+      microphoneOn: sql<boolean>`coalesce(${participantAnalysisState.microphoneOn}, 0)`,
+      speaking: sql<boolean>`coalesce(${participantAnalysisState.speaking}, 0)`,
+      speakingMs: sql<number>`coalesce(${participantAnalysisState.speakingMs}, 0)`,
+      speakingTurns: sql<number>`coalesce(${participantAnalysisState.speakingTurns}, 0)`,
+      faceDetected: sql<boolean>`coalesce(${participantAnalysisState.faceDetected}, 0)`,
+      faceCount: sql<number>`coalesce(${participantAnalysisState.faceCount}, 0)`,
       faceBox: participantAnalysisState.faceBox,
-      identityStatus: participantAnalysisState.identityStatus,
+      identityStatus: sql<string>`coalesce(${participantAnalysisState.identityStatus}, 'UNKNOWN')`,
       identityConfidence: participantAnalysisState.identityConfidence,
       headYaw: participantAnalysisState.headYaw,
       headPitch: participantAnalysisState.headPitch,
       headRoll: participantAnalysisState.headRoll,
-      headState: participantAnalysisState.headState,
+      headState: sql<string>`coalesce(${participantAnalysisState.headState}, 'UNKNOWN')`,
+      eyeClosed: sql<boolean>`coalesce(${participantAnalysisState.eyeClosed}, 0)`,
+      eyeOpenness: participantAnalysisState.eyeOpenness,
+      eyesClosedSince: participantAnalysisState.eyesClosedSince,
       screenFacingProbability: participantAnalysisState.screenFacingProbability,
-      currentState: participantAnalysisState.currentState,
-      currentStateSince: participantAnalysisState.currentStateSince,
+      currentState: sql<string>`coalesce(${participantAnalysisState.currentState}, 'ANALYSIS_PENDING')`,
+      currentStateSince: sql<number>`coalesce(${participantAnalysisState.currentStateSince}, ${sessionParticipants.createdAt})`,
       lastAnalyzedAt: participantAnalysisState.lastAnalyzedAt,
       analysisConfidence: participantAnalysisState.analysisConfidence,
-      analysisTier: participantAnalysisState.analysisTier,
+      analysisTier: sql<string>`coalesce(${participantAnalysisState.analysisTier}, 'NORMAL')`,
       thumbnailEvidenceId: participantAnalysisState.thumbnailEvidenceId,
       thumbnailAt: participantAnalysisState.thumbnailAt,
       traineeName: trainees.name,
@@ -470,13 +500,16 @@ app.get("/:id/participants", requirePermission("monitoring:read"), async (c) => 
       department: trainees.department,
       participantStatus: sessionParticipants.status,
     })
-    .from(participantAnalysisState)
-    .leftJoin(sessionParticipants, eq(sessionParticipants.id, participantAnalysisState.participantId))
+    .from(sessionParticipants)
+    .leftJoin(
+      participantAnalysisState,
+      eq(participantAnalysisState.participantId, sessionParticipants.id),
+    )
     .leftJoin(trainees, eq(trainees.id, sessionParticipants.traineeId))
     .where(
       and(
-        eq(participantAnalysisState.organizationId, actor.organizationId),
-        eq(participantAnalysisState.sessionId, session.id),
+        eq(sessionParticipants.organizationId, actor.organizationId),
+        eq(sessionParticipants.sessionId, session.id),
       ),
     )
     .limit(limit)
@@ -806,9 +839,13 @@ app.post("/:id/simulate", requirePermission("monitoring:write"), async (c) => {
   const runConfig = (run.config ?? {}) as Record<string, unknown>;
   const storedNumber = (v: unknown) => (typeof v === "number" && Number.isFinite(v) ? v : undefined);
   const seed = body.seed ?? storedNumber(runConfig.seed) ?? DEFAULT_SIMULATION_SEED;
-  const count = body.participantCount ?? storedNumber(runConfig.participantCount) ?? 12;
+  const count =
+    body.participantCount ?? storedNumber(runConfig.participantCount) ?? DEFAULT_SIMULATION_PARTICIPANTS;
 
-  const adapter = new MockZoomAdapter({ participantCount: count > 0 ? count : 12, seed });
+  const adapter = new MockZoomAdapter({
+    participantCount: count > 0 ? count : DEFAULT_SIMULATION_PARTICIPANTS,
+    seed,
+  });
 
   // Map each synthetic attendee onto a real session_participants row, so the
   // simulation exercises the same joins and tenancy checks as production.

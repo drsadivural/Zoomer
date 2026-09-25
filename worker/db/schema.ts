@@ -582,6 +582,14 @@ export const participantAnalysisState = sqliteTable(
     /** FORWARD | LEFT | RIGHT | UP | DOWN | UNKNOWN */
     headState: text("head_state").notNull().default("UNKNOWN"),
 
+    /** Eye state. Drowsiness is reported as a *suspicion* for a human to
+     *  confirm, never as an automatic judgement (PRODUCT_SPEC_JA.md §3.4). */
+    eyeClosed: integer("eye_closed", { mode: "boolean" }).notNull().default(false),
+    /** 0..1, higher means more open. Null when the provider cannot measure it. */
+    eyeOpenness: real("eye_openness"),
+    /** When the current unbroken run of closed eyes began. */
+    eyesClosedSince: integer("eyes_closed_since"),
+
     screenFacingProbability: real("screen_facing_probability"),
     gazeHorizontal: real("gaze_horizontal"),
     gazeVertical: real("gaze_vertical"),
@@ -632,6 +640,9 @@ export const participantObservations = sqliteTable(
     headPitch: real("head_pitch"),
     headRoll: real("head_roll"),
     screenFacingProbability: real("screen_facing_probability"),
+
+    eyeClosed: integer("eye_closed", { mode: "boolean" }),
+    eyeOpenness: real("eye_openness"),
 
     cameraOn: integer("camera_on", { mode: "boolean" }),
     microphoneOn: integer("microphone_on", { mode: "boolean" }),
@@ -735,6 +746,7 @@ export const meetingMonitoringSettings = sqliteTable("meeting_monitoring_setting
   screenFacingEnabled: integer("screen_facing_enabled", { mode: "boolean" }).notNull().default(true),
   headPoseEnabled: integer("head_pose_enabled", { mode: "boolean" }).notNull().default(true),
   multiFaceEnabled: integer("multi_face_enabled", { mode: "boolean" }).notNull().default(true),
+  drowsinessEnabled: integer("drowsiness_enabled", { mode: "boolean" }).notNull().default(true),
   participationAnalyticsEnabled: integer("participation_analytics_enabled", { mode: "boolean" }).notNull().default(true),
   transcriptEnabled: integer("transcript_enabled", { mode: "boolean" }).notNull().default(false),
 
@@ -754,6 +766,8 @@ export const meetingMonitoringSettings = sqliteTable("meeting_monitoring_setting
   cameraOffSec: integer("camera_off_sec").notNull().default(60),
   multiFaceSec: integer("multi_face_sec").notNull().default(5),
   longAbsenceSec: integer("long_absence_sec").notNull().default(300),
+  /** Eyes must stay closed this long before drowsiness is even suspected. */
+  eyesClosedSec: integer("eyes_closed_sec").notNull().default(10),
 
   identityConfidenceThreshold: real("identity_confidence_threshold").notNull().default(0.82),
   identityCacheSec: integer("identity_cache_sec").notNull().default(600),

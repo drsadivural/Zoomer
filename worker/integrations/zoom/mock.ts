@@ -40,6 +40,7 @@ export const SIMULATION_SCENARIOS = [
   "face-missing",
   "multiple-faces",
   "identity-mismatch",
+  "drowsy",
   "low-quality",
   "rejoining",
 ] as const;
@@ -88,6 +89,8 @@ export function simulateObservation(
     pose: idleJitter(rng),
     gazeHorizontal: (rng() - 0.5) * 0.12,
     gazeVertical: (rng() - 0.5) * 0.12,
+    eyeClosed: false,
+    eyeOpenness: 0.82 + rng() * 0.12,
     cameraOn: true,
     microphoneOn: true,
     speaking: false,
@@ -161,6 +164,13 @@ export function simulateObservation(
       return phase(100) < 50
         ? { ...base, identityStatus: "MISMATCH", identityConfidence: 0.86 }
         : base;
+
+    case "drowsy":
+      // Long closures with brief openings — the shape that should trip the
+      // drowsiness gate, rather than ordinary blinking which must not.
+      return phase(80) < 45
+        ? { ...base, eyeClosed: true, eyeOpenness: 0.04 + rng() * 0.06, pose: { yaw: 2, pitch: -14, roll: 3 } }
+        : { ...base, eyeClosed: false, eyeOpenness: 0.78 + rng() * 0.12 };
 
     case "low-quality":
       // Poor lighting / low-bitrate video: a face is there but we cannot trust it.
