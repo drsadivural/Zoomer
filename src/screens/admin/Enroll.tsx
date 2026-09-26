@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { Camera, CheckCircle2, FolderOpen, ImagePlus, Plus, Search, Trash2, Upload, UserPlus } from "lucide-react";
+import { Camera, CheckCircle2, FolderOpen, ImagePlus, Pencil, Plus, Search, Trash2, Upload, UserPlus } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
@@ -38,6 +38,8 @@ export function EnrollScreen() {
   const [importOpen, setImportOpen] = useState(false);
   const [batchOpen, setBatchOpen] = useState(false);
   const [faceTarget, setFaceTarget] = useState<Trainee | null>(null);
+  const [editTarget, setEditTarget] = useState<Trainee | null>(null);
+  const [deleteTarget, setDeleteTarget] = useState<Trainee | null>(null);
 
   function load() {
     setLoading(true);
@@ -162,12 +164,37 @@ export function EnrollScreen() {
                       {t.lastQuality != null ? percent(t.lastQuality, 0) : "—"}
                     </TableCell>
                     <TableCell className="text-right">
-                      {can("enrollment:write") && (
-                        <Button variant="outline" size="sm" className="gap-1.5" onClick={() => setFaceTarget(t)}>
-                          <Camera className="size-3.5" />
-                          顔登録
-                        </Button>
-                      )}
+                      <div className="flex items-center justify-end gap-1.5">
+                        {can("enrollment:write") && (
+                          <Button variant="outline" size="sm" className="gap-1.5" onClick={() => setFaceTarget(t)}>
+                            <Camera className="size-3.5" />
+                            顔登録
+                          </Button>
+                        )}
+                        {can("trainee:write") && (
+                          <>
+                            <Button
+                              variant="outline"
+                              size="sm"
+                              className="gap-1.5"
+                              onClick={() => setEditTarget(t)}
+                              aria-label={`${t.name} を編集`}
+                            >
+                              <Pencil className="size-3.5" />
+                              編集
+                            </Button>
+                            <Button
+                              variant="ghost"
+                              size="sm"
+                              className="text-rose-600 hover:bg-rose-50"
+                              onClick={() => setDeleteTarget(t)}
+                              aria-label={`${t.name} を削除`}
+                            >
+                              <Trash2 className="size-3.5" />
+                            </Button>
+                          </>
+                        )}
+                      </div>
                     </TableCell>
                   </TableRow>
                 ))}
@@ -187,6 +214,8 @@ export function EnrollScreen() {
         onDone={load}
       />
       <FaceEnrollDialog trainee={faceTarget} onClose={() => setFaceTarget(null)} onDone={load} />
+      <EditTraineeDialog trainee={editTarget} onClose={() => setEditTarget(null)} onSaved={load} />
+      <DeleteTraineeDialog trainee={deleteTarget} onClose={() => setDeleteTarget(null)} onDeleted={load} />
     </>
   );
 }
@@ -502,6 +531,7 @@ function FaceEnrollDialog({
   const [busy, setBusy] = useState(false);
   const [mode, setMode] = useState<EnrollMode>("camera");
   const [enrolled, setEnrolled] = useState<EnrolledFace | null>(null);
+  const [enrollmentImages, setEnrollmentImages] = useState<Record<string, string>>({});
 
   useEffect(() => {
     if (!trainee) return;
@@ -552,6 +582,31 @@ function FaceEnrollDialog({
       setBusy(false);
     }
   }
+
+  /**
+   * One image per enrollment, so the list shows *which* photo each template
+   * came from. The roster endpoint returns the newest per trainee, which
+   * would render every row of this list with the same face.
+   *
+   * Refetched whenever the set of enrollments changes — after an enrol or a
+   * delete — and silently skipped when thumbnails are off or the reader lacks
+   * evidence:view, in which case the list still shows quality and date.
+   */
+  useEffect(() => {
+    const ids = enrollments.filter((e) => e.hasImage).map((e) => e.id);
+    if (!ids.length) {
+      setEnrollmentImages({});
+      return;
+    }
+    let cancelled = false;
+    api
+      .enrollmentThumbnails(ids)
+      .then((r) => !cancelled && setEnrollmentImages(r.thumbnails))
+      .catch(() => !cancelled && setEnrollmentImages({}));
+    return () => {
+      cancelled = true;
+    };
+  }, [enrollments]);
 
   async function removeEnrollment(id: string) {
     if (!trainee) return;
@@ -629,24 +684,50 @@ function FaceEnrollDialog({
 
         {enrollments.length > 0 && (
           <div>
-            <p className="field-label mb-2">登録済みの顔特徴量</p>
-            <div className="divide-y divide-slate-100 rounded-xl border border-slate-200">
-              {enrollments.map((e) => (
-                <div key={e.id} className="flex items-center gap-3 px-3 py-2.5 text-sm">
+            <p className="field-label mb-2">
+              登録済みの顔（{enrollments.length}件）
+            </p>
+            <ul className="divide-y divide-slate-100 rounded-xl border border-slate-200">
+              {enrollments.map((e, i) => (
+                <li key={e.id} className="flex items-center gap-3 px-3 py-2.5 text-sm">
+                  {enrollmentImages[e.id] ? (
+                    <img
+                      src={enrollmentImages[e.id]}
+                      alt={`${trainee?.name ?? ""} の登録顔写真 ${enrollments.length - i}`}
+                      className="size-12 shrink-0 rounded-[11px] object-cover ring-1 ring-slate-200"
+                    />
+                  ) : (
+                    // Two different reasons for no picture, and the operator
+                    // needs to tell them apart: the photo was never stored
+                    // (thumbnails off at enrolment time, the default), or it
+                    // exists but could not be fetched.
+                    <div
+                      className="grid size-12 shrink-0 place-items-center rounded-[11px] bg-slate-100 text-[0.6rem] font-semibold text-slate-400 ring-1 ring-slate-200"
+                      title={e.hasImage ? "写真を取得できませんでした" : "この登録では顔写真を保存していません"}
+                    >
+                      {e.hasImage ? "取得不可" : "写真なし"}
+                    </div>
+                  )}
                   <div className="min-w-0 flex-1">
                     <div className="font-semibold text-slate-800">
                       品質 {percent(e.qualityScore, 0)} ・ {e.status === "ACTIVE" ? "有効" : "無効"}
                     </div>
-                    <div className="text-xs text-slate-500">
+                    <div className="truncate text-xs text-slate-500">
                       {formatDateTime(e.createdAt)} ・ {e.engine}
                     </div>
                   </div>
-                  <Button variant="ghost" size="sm" className="text-rose-600" onClick={() => void removeEnrollment(e.id)}>
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    className="text-rose-600"
+                    aria-label={`${formatDateTime(e.createdAt)} の登録を削除`}
+                    onClick={() => void removeEnrollment(e.id)}
+                  >
                     <Trash2 className="size-3.5" />
                   </Button>
-                </div>
+                </li>
               ))}
-            </div>
+            </ul>
           </div>
         )}
 
@@ -722,5 +803,220 @@ function EnrolledConfirmation({ enrolled }: { enrolled: EnrolledFace }) {
         </div>
       </div>
     </div>
+  );
+}
+
+/**
+ * Edit a trainee's details.
+ *
+ * Deliberately does not touch face data: changing a name is a clerical
+ * correction, and silently invalidating a biometric template because someone
+ * fixed a typo in a department would be a surprising and expensive side
+ * effect. Face enrolments are managed in their own dialog.
+ */
+function EditTraineeDialog({
+  trainee, onClose, onSaved,
+}: { trainee: Trainee | null; onClose: () => void; onSaved: () => void }) {
+  const [form, setForm] = useState(EMPTY_TRAINEE_FORM);
+  const [status, setStatus] = useState("ACTIVE");
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (!trainee) return;
+    setForm({
+      externalId: trainee.externalId,
+      name: trainee.name,
+      department: trainee.department ?? "",
+      email: trainee.email ?? "",
+    });
+    setStatus(trainee.status);
+    setError(null);
+  }, [trainee]);
+
+  async function submit(e: React.FormEvent) {
+    e.preventDefault();
+    if (!trainee) return;
+    setBusy(true);
+    setError(null);
+    try {
+      await api.updateTrainee(trainee.id, {
+        externalId: form.externalId.trim(),
+        name: form.name.trim(),
+        // Empty means "cleared", which is different from "unchanged"; the
+        // form always sends the current contents of every field.
+        department: form.department.trim() || undefined,
+        email: form.email.trim() || undefined,
+        status,
+      });
+      onSaved();
+      onClose();
+    } catch (err) {
+      setError(err instanceof ApiClientError ? err.message : "保存に失敗しました");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <Dialog open={Boolean(trainee)} onOpenChange={(v) => !v && onClose()}>
+      <DialogContent className="sm:max-w-md">
+        <DialogHeader>
+          <DialogTitle>受講者を編集</DialogTitle>
+          <DialogDescription>
+            氏名・所属などを修正します。登録済みの顔特徴量には影響しません。
+          </DialogDescription>
+        </DialogHeader>
+        <form className="space-y-3" onSubmit={submit}>
+          <div className="space-y-1.5">
+            <label className="field-label" htmlFor="edit-external">受講者ID</label>
+            <Input
+              id="edit-external"
+              required
+              value={form.externalId}
+              onChange={(e) => setForm({ ...form, externalId: e.target.value })}
+            />
+          </div>
+          <div className="space-y-1.5">
+            <label className="field-label" htmlFor="edit-name">氏名</label>
+            <Input
+              id="edit-name"
+              required
+              value={form.name}
+              onChange={(e) => setForm({ ...form, name: e.target.value })}
+            />
+          </div>
+          <div className="space-y-1.5">
+            <label className="field-label" htmlFor="edit-dept">所属</label>
+            <Input
+              id="edit-dept"
+              value={form.department}
+              onChange={(e) => setForm({ ...form, department: e.target.value })}
+            />
+          </div>
+          <div className="space-y-1.5">
+            <label className="field-label" htmlFor="edit-email">メール</label>
+            <Input
+              id="edit-email"
+              type="email"
+              value={form.email}
+              onChange={(e) => setForm({ ...form, email: e.target.value })}
+            />
+          </div>
+          <div className="space-y-1.5">
+            <label className="field-label" htmlFor="edit-status">状態</label>
+            <select
+              id="edit-status"
+              className="h-10 w-full rounded-xl border border-slate-200 bg-white px-3 text-sm"
+              value={status}
+              onChange={(e) => setStatus(e.target.value)}
+            >
+              <option value="ACTIVE">有効</option>
+              <option value="INACTIVE">無効</option>
+            </select>
+          </div>
+
+          {error && (
+            <div role="alert" className="rounded-xl border border-rose-200 bg-rose-50 px-3 py-2 text-sm text-rose-700">
+              {error}
+            </div>
+          )}
+
+          <DialogFooter>
+            <Button type="button" variant="outline" onClick={onClose}>キャンセル</Button>
+            <Button type="submit" disabled={busy}>{busy ? "保存中…" : "保存"}</Button>
+          </DialogFooter>
+        </form>
+      </DialogContent>
+    </Dialog>
+  );
+}
+
+/**
+ * Delete a trainee.
+ *
+ * Typed confirmation rather than a plain OK: this revokes the person's
+ * biometric template, which cannot be undone from the UI and cannot be
+ * reconstructed — the original photograph was never stored. The dialog says
+ * exactly that, and how many templates go with them, because "削除" on a row
+ * of a table does not convey it.
+ */
+function DeleteTraineeDialog({
+  trainee, onClose, onDeleted,
+}: { trainee: Trainee | null; onClose: () => void; onDeleted: () => void }) {
+  const [confirm, setConfirm] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    setConfirm("");
+    setError(null);
+  }, [trainee]);
+
+  async function remove() {
+    if (!trainee) return;
+    setBusy(true);
+    setError(null);
+    try {
+      await api.deleteTrainee(trainee.id);
+      onDeleted();
+      onClose();
+    } catch (err) {
+      setError(err instanceof ApiClientError ? err.message : "削除に失敗しました");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  const armed = trainee != null && confirm.trim() === trainee.name;
+
+  return (
+    <Dialog open={Boolean(trainee)} onOpenChange={(v) => !v && onClose()}>
+      <DialogContent className="sm:max-w-md">
+        <DialogHeader>
+          <DialogTitle>受講者を削除</DialogTitle>
+          <DialogDescription>
+            この操作は取り消せません。監査ログには削除の記録が残ります。
+          </DialogDescription>
+        </DialogHeader>
+
+        <div className="rounded-xl border border-rose-200 bg-rose-50 px-3 py-2.5 text-sm text-rose-800">
+          <div className="font-bold">{trainee?.name}（{trainee?.externalId}）</div>
+          <p className="mt-1">
+            登録済みの顔特徴量 {trainee?.enrollmentCount ?? 0} 件も同時に失効します。
+            原画像は保存していないため、復元はできません。
+          </p>
+        </div>
+
+        <div className="space-y-1.5">
+          <label className="field-label" htmlFor="delete-confirm">
+            確認のため氏名「{trainee?.name}」を入力してください
+          </label>
+          <Input
+            id="delete-confirm"
+            value={confirm}
+            onChange={(e) => setConfirm(e.target.value)}
+            autoComplete="off"
+          />
+        </div>
+
+        {error && (
+          <div role="alert" className="rounded-xl border border-rose-200 bg-rose-50 px-3 py-2 text-sm text-rose-700">
+            {error}
+          </div>
+        )}
+
+        <DialogFooter>
+          <Button variant="outline" onClick={onClose}>キャンセル</Button>
+          <Button
+            className="bg-rose-600 hover:bg-rose-700"
+            disabled={!armed || busy}
+            onClick={() => void remove()}
+          >
+            {busy ? "削除中…" : "削除する"}
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
   );
 }
