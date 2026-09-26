@@ -16,6 +16,7 @@ import { MeetingKPIs, MeetingStatusStrip } from "@/components/meeting-monitoring
 import { ParticipantGrid } from "@/components/meeting-monitoring/ParticipantGrid";
 import { ParticipantDetail } from "@/components/meeting-monitoring/ParticipantDetail";
 import { EventFeed } from "@/components/meeting-monitoring/EventFeed";
+import { ZoomReadiness } from "@/components/meeting-monitoring/ZoomReadiness";
 import {
   FilterBar,
   matchesFilter,
@@ -207,14 +208,38 @@ export function LiveMeetingScreen() {
 
       {!sessionId ? (
         <AppCard>
-          <EmptyState title="会議を選択してください" description="監視する会議を上のリストから選びます。" />
+          <EmptyState
+            title="監視できる会議がありません"
+            description="Zoomで会議を開始すると自動で表示されます。表示されない場合は下の確認結果をご覧ください。"
+          />
+          <ZoomReadiness />
         </AppCard>
       ) : !analysis ? (
-        <AppCard>{loading ? <LoadingRows rows={5} /> : <EmptyState title="データがありません" />}</AppCard>
+        <AppCard>
+          {loading ? (
+            <LoadingRows rows={5} />
+          ) : (
+            <>
+              <EmptyState title="データがありません" />
+              <ZoomReadiness />
+            </>
+          )}
+        </AppCard>
       ) : (
         <>
           <MeetingStatusStrip data={analysis} now={serverTime} />
           <MeetingKPIs kpis={analysis.kpis} />
+          {/* A meeting with nobody in it looks the same whether nobody has
+              joined or Zoom has never been able to tell us anything. */}
+          {!participants.length && (
+            <AppCard>
+              <EmptyState
+                title="参加者がいません"
+                description="Zoomの参加者は会議の開始時に自動で取り込まれます。取り込まれない場合は下の確認結果をご覧ください。"
+              />
+              <ZoomReadiness />
+            </AppCard>
+          )}
 
           {attention.length > 0 && (
             <AppCard className="border-rose-200 bg-rose-50/40">
