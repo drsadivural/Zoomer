@@ -540,6 +540,10 @@ export interface DashboardResponse {
 export interface ZoomStatus {
   connected: boolean;
   integration: { status: string; scope: string | null; connectedAt: number | null; expiresAt: number | null } | null;
+  /** Scopes the app needs that this token was never granted. */
+  missingScopes: string[];
+  /** Connected, but the token predates a scope change and cannot be used. */
+  reauthRequired: boolean;
   redirectUri: string;
   webhookUrl: string;
   configured: boolean;

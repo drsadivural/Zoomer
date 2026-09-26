@@ -191,9 +191,19 @@ app.get("/status", requireAuth, requirePermission("settings:read"), async (c) =>
     )
     .limit(1);
 
+  // A token carries the scopes it was granted at authorization time. Adding
+  // scopes in Marketplace does not widen a token that already exists, so an
+  // integration can be CONNECTED and still unable to do anything — which
+  // reads, on a settings page, as a working connection. Report the gap so it
+  // can say "reconnect" instead of a green tick.
+  const granted = new Set((rows[0]?.scope ?? "").split(/\s+/).filter(Boolean));
+  const missingScopes = rows[0] ? ZOOM_SCOPES.filter((sc) => !granted.has(sc)) : [];
+
   return c.json({
     connected: rows[0]?.status === "CONNECTED",
     integration: rows[0] ?? null,
+    missingScopes,
+    reauthRequired: rows[0]?.status === "CONNECTED" && missingScopes.length > 0,
     redirectUri: redirectUri(c.env),
     webhookUrl: new URL("/api/v1/webhooks/zoom", c.env.PUBLIC_BASE_URL).toString(),
     configured: Boolean(c.env.ZOOM_CLIENT_ID && c.env.ZOOM_CLIENT_SECRET),
