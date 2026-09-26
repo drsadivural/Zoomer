@@ -37,9 +37,40 @@ export function EnrollScreen() {
   const [createOpen, setCreateOpen] = useState(false);
   const [importOpen, setImportOpen] = useState(false);
   const [batchOpen, setBatchOpen] = useState(false);
-  const [faceTarget, setFaceTarget] = useState<Trainee | null>(null);
   const [editTarget, setEditTarget] = useState<Trainee | null>(null);
   const [deleteTarget, setDeleteTarget] = useState<Trainee | null>(null);
+  /**
+   * Whether face photos are stored at all.
+   *
+   * Null while unknown. The roster falls back to initials both when a trainee
+   * has no photo and when the organization stores none, and those look
+   * identical — an operator who has enrolled ten faces and sees ten sets of
+   * initials has no way to tell that the setting is off. So the screen says
+   * so, once, above the table.
+   */
+  const [thumbnailsEnabled, setThumbnailsEnabled] = useState<boolean | null>(null);
+  const [enablingThumbnails, setEnablingThumbnails] = useState(false);
+
+  useEffect(() => {
+    api
+      .getMeetingSettings()
+      .then((r) => setThumbnailsEnabled(r.settings.enrollmentThumbnailsEnabled))
+      // A reader without settings access simply does not get the notice.
+      .catch(() => setThumbnailsEnabled(null));
+  }, []);
+
+  async function enableThumbnails() {
+    setEnablingThumbnails(true);
+    try {
+      const r = await api.saveMeetingSettings({ enrollmentThumbnailsEnabled: true });
+      setThumbnailsEnabled(r.settings.enrollmentThumbnailsEnabled);
+      load();
+    } catch (e) {
+      setError(e instanceof ApiClientError ? e.message : "設定を変更できません");
+    } finally {
+      setEnablingThumbnails(false);
+    }
+  }
 
   function load() {
     setLoading(true);
@@ -100,6 +131,30 @@ export function EnrollScreen() {
           }
         />
 
+        {thumbnailsEnabled === false && (
+          <div className="mx-5 mb-3 rounded-xl border border-amber-200 bg-amber-50 px-3 py-2.5 text-sm text-amber-900">
+            <div className="font-semibold">顔写真サムネイルの保存が無効です</div>
+            <p className="mt-1 text-xs">
+              一覧には氏名の頭文字のみが表示されます。有効にすると、
+              <strong>これ以降に登録した顔</strong>のサムネイルが表示されます。
+              既存の登録には適用されません — 原画像を保存していないため、
+              後からサムネイルだけを作成することはできず、登録し直しが必要です。
+            </p>
+            {can("settings:write") && (
+              <Button
+                size="sm"
+                variant="outline"
+                className="mt-2 gap-1.5"
+                onClick={() => void enableThumbnails()}
+                disabled={enablingThumbnails}
+              >
+                <ImagePlus className="size-3.5" />
+                {enablingThumbnails ? "変更中…" : "サムネイル保存を有効にする"}
+              </Button>
+            )}
+          </div>
+        )}
+
         <div className="px-5 pb-3">
           <div className="relative">
             <Search className="absolute left-3 top-1/2 size-4 -translate-y-1/2 text-slate-400" />
@@ -144,7 +199,20 @@ export function EnrollScreen() {
                             className="size-9 shrink-0 rounded-[11px] object-cover"
                           />
                         ) : (
-                          <div className="avatar-cell" aria-hidden="true">{t.name.slice(0, 2)}</div>
+                          // Initials cover three different situations and the
+                          // operator asks about all of them, so say which.
+                          <div
+                            className="avatar-cell"
+                            title={
+                              t.enrollmentCount === 0
+                                ? "顔が未登録です"
+                                : thumbnailsEnabled === false
+                                  ? "顔写真サムネイルの保存が無効です"
+                                  : "この受講者の登録には顔写真が保存されていません。登録し直すと表示されます。"
+                            }
+                          >
+                            {t.name.slice(0, 2)}
+                          </div>
                         )}
                         <div className="min-w-0">
                           <div className="truncate font-bold text-slate-900">{t.name}</div>
@@ -165,23 +233,16 @@ export function EnrollScreen() {
                     </TableCell>
                     <TableCell className="text-right">
                       <div className="flex items-center justify-end gap-1.5">
-                        {can("enrollment:write") && (
-                          <Button variant="outline" size="sm" className="gap-1.5" onClick={() => setFaceTarget(t)}>
-                            <Camera className="size-3.5" />
-                            顔登録
-                          </Button>
-                        )}
                         {can("trainee:write") && (
                           <>
                             <Button
-                              variant="outline"
                               size="sm"
                               className="gap-1.5"
                               onClick={() => setEditTarget(t)}
                               aria-label={`${t.name} を編集`}
                             >
                               <Pencil className="size-3.5" />
-                              編集
+                              編集・顔登録
                             </Button>
                             <Button
                               variant="ghost"
@@ -213,7 +274,6 @@ export function EnrollScreen() {
         consentScope={CONSENT_SCOPE}
         onDone={load}
       />
-      <FaceEnrollDialog trainee={faceTarget} onClose={() => setFaceTarget(null)} onDone={load} />
       <EditTraineeDialog trainee={editTarget} onClose={() => setEditTarget(null)} onSaved={load} />
       <DeleteTraineeDialog trainee={deleteTarget} onClose={() => setDeleteTarget(null)} onDeleted={load} />
     </>
@@ -521,9 +581,18 @@ function ImportDialog({
   );
 }
 
-function FaceEnrollDialog({
-  trainee, onClose, onDone,
-}: { trainee: Trainee | null; onClose: () => void; onDone: () => void }) {
+/**
+ * Face enrolment for one trainee: consent, capture or upload, and the list of
+ * faces already registered.
+ *
+ * A panel rather than a dialog of its own. Enrolling a face is part of
+ * maintaining a trainee record, not a separate errand, and having it behind
+ * its own row button meant the roster carried two buttons that both opened
+ * "that person" and neither of which was the whole of them.
+ */
+function FaceEnrollPanel({
+  trainee, onDone,
+}: { trainee: Trainee | null; onDone: () => void }) {
   const [enrollments, setEnrollments] = useState<Enrollment[]>([]);
   const [consent, setConsent] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -617,125 +686,118 @@ function FaceEnrollDialog({
   }
 
   return (
-    <Dialog open={Boolean(trainee)} onOpenChange={(v) => !v && onClose()}>
-      <DialogContent className="max-h-[90vh] overflow-y-auto sm:max-w-lg">
-        <DialogHeader>
-          <DialogTitle>顔登録 — {trainee?.name}</DialogTitle>
-          <DialogDescription>
-            本人確認に使用する顔特徴量を登録します。特徴量は暗号化して保存し、原画像は保存しません。
-          </DialogDescription>
-        </DialogHeader>
+    <div className="space-y-3">
+      <p className="text-xs text-slate-500">
+      本人確認に使用する顔特徴量を登録します。特徴量は暗号化して保存し、原画像は保存しません
+      （顔写真サムネイルが有効な場合のみ、一覧表示用の小さな画像を暗号化して保存します）。
+      </p>
 
-        <label className="flex items-start gap-2.5 rounded-xl border border-cyan-200 bg-cyan-50/60 p-3 text-sm">
-          <input
-            type="checkbox"
-            className="mt-0.5"
-            checked={consent}
-            onChange={(e) => setConsent(e.target.checked)}
-          />
-          <span className="text-cyan-900">
-            受講者本人から、カメラ利用・顔情報の処理・証跡画像および顔写真サムネイルの保存（有効時）
-            について同意を取得しました。（同意文面バージョン {CONSENT_POLICY_VERSION}）
-          </span>
-        </label>
+      <label className="flex items-start gap-2.5 rounded-xl border border-cyan-200 bg-cyan-50/60 p-3 text-sm">
+        <input
+          type="checkbox"
+          className="mt-0.5"
+          checked={consent}
+          onChange={(e) => setConsent(e.target.checked)}
+        />
+        <span className="text-cyan-900">
+          受講者本人から、カメラ利用・顔情報の処理・証跡画像および顔写真サムネイルの保存（有効時）
+          について同意を取得しました。（同意文面バージョン {CONSENT_POLICY_VERSION}）
+        </span>
+      </label>
 
-        {enrolled && <EnrolledConfirmation enrolled={enrolled} />}
-        {error && (
-          <div role="alert" className="rounded-xl border border-rose-200 bg-rose-50 px-3 py-2 text-sm text-rose-700">
-            <div className="font-semibold">{error}</div>
-            {reasons.length > 0 && (
-              <ul className="mt-1 list-inside list-disc">
-                {reasons.map((r) => <li key={r}>{r}</li>)}
-              </ul>
-            )}
-          </div>
-        )}
-
-        {consent ? (
-          <div className="space-y-3">
-            <div className="flex gap-1 rounded-xl bg-slate-100 p-1" role="tablist" aria-label="登録方法">
-              {/* Switching source clears the previous result: a success card
-                  left standing above a fresh camera preview reads as if the
-                  shot you are about to take has already been registered. */}
-              <ModeTab active={mode === "camera"} onClick={() => { setMode("camera"); setEnrolled(null); }}>
-                <Camera className="size-3.5" />
-                カメラで撮影
-              </ModeTab>
-              <ModeTab active={mode === "photo"} onClick={() => { setMode("photo"); setEnrolled(null); }}>
-                <ImagePlus className="size-3.5" />
-                画像から登録
-              </ModeTab>
-            </div>
-            {mode === "camera" ? (
-              <FaceCapture onCapture={handleCapture} captureLabel="撮影して登録" busy={busy} requireLiveness={false} />
-            ) : (
-              <PhotoEnroll onCapture={handleCapture} busy={busy} />
-            )}
-          </div>
-        ) : (
-          <div className="upload-zone">
-            <Camera className="size-7 text-cyan-700" />
-            <p className="text-sm font-bold text-slate-700">同意の確認が必要です</p>
-            <p className="text-xs text-slate-500">
-              上のチェックボックスにチェックを入れるとカメラを起動できます。
-            </p>
-          </div>
-        )}
-
-        {enrollments.length > 0 && (
-          <div>
-            <p className="field-label mb-2">
-              登録済みの顔（{enrollments.length}件）
-            </p>
-            <ul className="divide-y divide-slate-100 rounded-xl border border-slate-200">
-              {enrollments.map((e, i) => (
-                <li key={e.id} className="flex items-center gap-3 px-3 py-2.5 text-sm">
-                  {enrollmentImages[e.id] ? (
-                    <img
-                      src={enrollmentImages[e.id]}
-                      alt={`${trainee?.name ?? ""} の登録顔写真 ${enrollments.length - i}`}
-                      className="size-12 shrink-0 rounded-[11px] object-cover ring-1 ring-slate-200"
-                    />
-                  ) : (
-                    // Two different reasons for no picture, and the operator
-                    // needs to tell them apart: the photo was never stored
-                    // (thumbnails off at enrolment time, the default), or it
-                    // exists but could not be fetched.
-                    <div
-                      className="grid size-12 shrink-0 place-items-center rounded-[11px] bg-slate-100 text-[0.6rem] font-semibold text-slate-400 ring-1 ring-slate-200"
-                      title={e.hasImage ? "写真を取得できませんでした" : "この登録では顔写真を保存していません"}
-                    >
-                      {e.hasImage ? "取得不可" : "写真なし"}
-                    </div>
-                  )}
-                  <div className="min-w-0 flex-1">
-                    <div className="font-semibold text-slate-800">
-                      品質 {percent(e.qualityScore, 0)} ・ {e.status === "ACTIVE" ? "有効" : "無効"}
-                    </div>
-                    <div className="truncate text-xs text-slate-500">
-                      {formatDateTime(e.createdAt)} ・ {e.engine}
-                    </div>
-                  </div>
-                  <Button
-                    variant="ghost"
-                    size="sm"
-                    className="text-rose-600"
-                    aria-label={`${formatDateTime(e.createdAt)} の登録を削除`}
-                    onClick={() => void removeEnrollment(e.id)}
-                  >
-                    <Trash2 className="size-3.5" />
-                  </Button>
-                </li>
-              ))}
+      {enrolled && <EnrolledConfirmation enrolled={enrolled} />}
+      {error && (
+        <div role="alert" className="rounded-xl border border-rose-200 bg-rose-50 px-3 py-2 text-sm text-rose-700">
+          <div className="font-semibold">{error}</div>
+          {reasons.length > 0 && (
+            <ul className="mt-1 list-inside list-disc">
+              {reasons.map((r) => <li key={r}>{r}</li>)}
             </ul>
-          </div>
-        )}
+          )}
+        </div>
+      )}
 
-        <DialogFooter>
-          <Button variant="outline" onClick={onClose}>閉じる</Button>
-        </DialogFooter>
-      </DialogContent>
-    </Dialog>
+      {consent ? (
+        <div className="space-y-3">
+          <div className="flex gap-1 rounded-xl bg-slate-100 p-1" role="tablist" aria-label="登録方法">
+            {/* Switching source clears the previous result: a success card
+                left standing above a fresh camera preview reads as if the
+                shot you are about to take has already been registered. */}
+            <ModeTab active={mode === "camera"} onClick={() => { setMode("camera"); setEnrolled(null); }}>
+              <Camera className="size-3.5" />
+              カメラで撮影
+            </ModeTab>
+            <ModeTab active={mode === "photo"} onClick={() => { setMode("photo"); setEnrolled(null); }}>
+              <ImagePlus className="size-3.5" />
+              画像から登録
+            </ModeTab>
+          </div>
+          {mode === "camera" ? (
+            <FaceCapture onCapture={handleCapture} captureLabel="撮影して登録" busy={busy} requireLiveness={false} />
+          ) : (
+            <PhotoEnroll onCapture={handleCapture} busy={busy} />
+          )}
+        </div>
+      ) : (
+        <div className="upload-zone">
+          <Camera className="size-7 text-cyan-700" />
+          <p className="text-sm font-bold text-slate-700">同意の確認が必要です</p>
+          <p className="text-xs text-slate-500">
+            上のチェックボックスにチェックを入れるとカメラを起動できます。
+          </p>
+        </div>
+      )}
+
+      {enrollments.length > 0 && (
+        <div>
+          <p className="field-label mb-2">
+            登録済みの顔（{enrollments.length}件）
+          </p>
+          <ul className="divide-y divide-slate-100 rounded-xl border border-slate-200">
+            {enrollments.map((e, i) => (
+              <li key={e.id} className="flex items-center gap-3 px-3 py-2.5 text-sm">
+                {enrollmentImages[e.id] ? (
+                  <img
+                    src={enrollmentImages[e.id]}
+                    alt={`${trainee?.name ?? ""} の登録顔写真 ${enrollments.length - i}`}
+                    className="size-12 shrink-0 rounded-[11px] object-cover ring-1 ring-slate-200"
+                  />
+                ) : (
+                  // Two different reasons for no picture, and the operator
+                  // needs to tell them apart: the photo was never stored
+                  // (thumbnails off at enrolment time, the default), or it
+                  // exists but could not be fetched.
+                  <div
+                    className="grid size-12 shrink-0 place-items-center rounded-[11px] bg-slate-100 text-[0.6rem] font-semibold text-slate-400 ring-1 ring-slate-200"
+                    title={e.hasImage ? "写真を取得できませんでした" : "この登録では顔写真を保存していません"}
+                  >
+                    {e.hasImage ? "取得不可" : "写真なし"}
+                  </div>
+                )}
+                <div className="min-w-0 flex-1">
+                  <div className="font-semibold text-slate-800">
+                    品質 {percent(e.qualityScore, 0)} ・ {e.status === "ACTIVE" ? "有効" : "無効"}
+                  </div>
+                  <div className="truncate text-xs text-slate-500">
+                    {formatDateTime(e.createdAt)} ・ {e.engine}
+                  </div>
+                </div>
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  className="text-rose-600"
+                  aria-label={`${formatDateTime(e.createdAt)} の登録を削除`}
+                  onClick={() => void removeEnrollment(e.id)}
+                >
+                  <Trash2 className="size-3.5" />
+                </Button>
+              </li>
+            ))}
+          </ul>
+        </div>
+      )}
+
+    </div>
   );
 }
 
@@ -821,9 +883,15 @@ function EditTraineeDialog({
   const [status, setStatus] = useState("ACTIVE");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [tab, setTab] = useState<"details" | "face">("details");
+  const faceCount = trainee?.enrollmentCount ?? 0;
 
   useEffect(() => {
     if (!trainee) return;
+    // Always reopen on 基本情報: the dialog is reused for every row, and
+    // landing on someone else's face tab because that is where you were last
+    // is how the wrong person gets a photo registered.
+    setTab("details");
     setForm({
       externalId: trainee.externalId,
       name: trainee.name,
@@ -860,13 +928,28 @@ function EditTraineeDialog({
 
   return (
     <Dialog open={Boolean(trainee)} onOpenChange={(v) => !v && onClose()}>
-      <DialogContent className="sm:max-w-md">
+      <DialogContent className="max-h-[90vh] overflow-y-auto sm:max-w-lg">
         <DialogHeader>
-          <DialogTitle>受講者を編集</DialogTitle>
+          <DialogTitle>{trainee?.name}</DialogTitle>
           <DialogDescription>
-            氏名・所属などを修正します。登録済みの顔特徴量には影響しません。
+            受講者情報の修正と顔登録。基本情報の変更は登録済みの顔特徴量に影響しません。
           </DialogDescription>
         </DialogHeader>
+
+        <div className="flex gap-1 rounded-xl bg-slate-100 p-1" role="tablist" aria-label="編集の種類">
+          <ModeTab active={tab === "details"} onClick={() => setTab("details")}>
+            <UserPlus className="size-3.5" />
+            基本情報
+          </ModeTab>
+          <ModeTab active={tab === "face"} onClick={() => setTab("face")}>
+            <ImagePlus className="size-3.5" />
+            顔写真{faceCount ? `（${faceCount}）` : ""}
+          </ModeTab>
+        </div>
+
+        {tab === "face" ? (
+          <FaceEnrollPanel trainee={trainee} onDone={onSaved} />
+        ) : (
         <form className="space-y-3" onSubmit={submit}>
           <div className="space-y-1.5">
             <label className="field-label" htmlFor="edit-external">受講者ID</label>
@@ -927,6 +1010,13 @@ function EditTraineeDialog({
             <Button type="submit" disabled={busy}>{busy ? "保存中…" : "保存"}</Button>
           </DialogFooter>
         </form>
+        )}
+
+        {tab === "face" && (
+          <DialogFooter>
+            <Button variant="outline" onClick={onClose}>閉じる</Button>
+          </DialogFooter>
+        )}
       </DialogContent>
     </Dialog>
   );
