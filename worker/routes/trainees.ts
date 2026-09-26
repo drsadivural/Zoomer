@@ -375,9 +375,16 @@ app.post("/import", requirePermission("trainee:write"), async (c) => {
 
 /* ------------------------------------------------------- face thumbnails */
 
-const thumbnailsSchema = z.object({
-  traineeIds: z.array(z.string().min(1)).min(1).max(200),
-});
+const thumbnailsSchema = z
+  .object({
+    /** Roster view: the newest stored photo per trainee. */
+    traineeIds: z.array(z.string().min(1)).min(1).max(200).optional(),
+    /** Detail view: one image per enrollment, so alternate poses are distinct. */
+    enrollmentIds: z.array(z.string().min(1)).min(1).max(200).optional(),
+  })
+  .refine((v) => v.traineeIds?.length || v.enrollmentIds?.length, {
+    message: "traineeIds または enrollmentIds が必要です",
+  });
 
 /**
  * Returns the stored face thumbnail for each requested trainee.
@@ -402,8 +409,11 @@ app.post("/thumbnails", requirePermission("evidence:view"), async (c) => {
   }
 
   const db = drizzle(c.env.DB);
+  const byEnrollment = Boolean(body.enrollmentIds?.length);
+
   const rows = await db
     .select({
+      id: faceEnrollments.id,
       traineeId: faceEnrollments.traineeId,
       imageKey: faceEnrollments.imageKey,
       createdAt: faceEnrollments.createdAt,
@@ -412,26 +422,32 @@ app.post("/thumbnails", requirePermission("evidence:view"), async (c) => {
     .where(
       and(
         eq(faceEnrollments.organizationId, actor.organizationId),
-        inArray(faceEnrollments.traineeId, body.traineeIds),
+        byEnrollment
+          ? inArray(faceEnrollments.id, body.enrollmentIds!)
+          : inArray(faceEnrollments.traineeId, body.traineeIds!),
         eq(faceEnrollments.status, "ACTIVE"),
         isNull(faceEnrollments.deletedAt),
       ),
     )
     .orderBy(desc(faceEnrollments.createdAt));
 
-  // Newest enrolled photo per trainee; the rest are alternate poses.
-  const newest = new Map<string, string>();
+  // Keyed by whatever was asked for. By trainee it is the newest photo and the
+  // rest are alternate poses; by enrollment every one is returned, which is
+  // what makes a per-enrollment list able to show which photo is which.
+  const wanted = new Map<string, string>();
   for (const r of rows) {
-    if (r.imageKey && !newest.has(r.traineeId)) newest.set(r.traineeId, r.imageKey);
+    if (!r.imageKey) continue;
+    if (byEnrollment) wanted.set(r.id, r.imageKey);
+    else if (!wanted.has(r.traineeId)) wanted.set(r.traineeId, r.imageKey);
   }
 
   const thumbnails: Record<string, string> = {};
-  for (const [traineeId, objectKey] of newest) {
+  for (const [id, objectKey] of wanted) {
     const stored = await getDecrypted(c.env.EVIDENCE, objectKey, key);
     // A missing object is not an error: retention or a deletion may have
     // removed it, and the row is repaired on the next enrollment.
     if (!stored) continue;
-    thumbnails[traineeId] = `data:${stored.contentType};base64,${b64encode(stored.bytes)}`;
+    thumbnails[id] = `data:${stored.contentType};base64,${b64encode(stored.bytes)}`;
   }
 
   await recordAudit(c.env.DB, {
@@ -439,7 +455,11 @@ app.post("/thumbnails", requirePermission("evidence:view"), async (c) => {
     actorId: actor.userId,
     action: "enrollment.thumbnails.view",
     resourceType: "face_enrollment",
-    metadata: { requested: body.traineeIds.length, served: Object.keys(thumbnails).length },
+    metadata: {
+      keyedBy: byEnrollment ? "enrollment" : "trainee",
+      requested: (body.enrollmentIds ?? body.traineeIds ?? []).length,
+      served: Object.keys(thumbnails).length,
+    },
     requestId: c.get("requestId"),
   });
 

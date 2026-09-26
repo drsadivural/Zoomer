@@ -108,6 +108,12 @@ export const api = {
       method: "POST",
       body: { traineeIds },
     }),
+  /** Keyed by enrollment id, so a list can show which photo is which. */
+  enrollmentThumbnails: (enrollmentIds: string[]) =>
+    request<{ thumbnails: Record<string, string>; enabled: boolean }>("/trainees/thumbnails", {
+      method: "POST",
+      body: { enrollmentIds },
+    }),
   enroll: (id: string, body: EnrollRequest) =>
     request<{ enrollment: { id: string; qualityScore: number } }>(`/trainees/${id}/enrollments`, {
       method: "POST",
