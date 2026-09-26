@@ -101,6 +101,11 @@ export const api = {
   deleteTrainee: (id: string) => request<{ ok: boolean }>(`/trainees/${id}`, { method: "DELETE" }),
   importTrainees: (csv: string) =>
     request<ImportResult>("/trainees/import", { method: "POST", body: { csv } }),
+  traineeThumbnails: (traineeIds: string[]) =>
+    request<{ thumbnails: Record<string, string>; enabled: boolean }>("/trainees/thumbnails", {
+      method: "POST",
+      body: { traineeIds },
+    }),
   enroll: (id: string, body: EnrollRequest) =>
     request<{ enrollment: { id: string; qualityScore: number } }>(`/trainees/${id}/enrollments`, {
       method: "POST",
@@ -278,6 +283,8 @@ export interface Trainee extends NewTrainee {
   status: string;
   createdAt: number;
   enrollmentCount: number;
+  /** Number of active enrollments that have a stored thumbnail. */
+  hasThumbnail?: number;
   lastQuality: number | null;
 }
 
@@ -327,6 +334,8 @@ export interface EnrollRequest {
   modelVersion: string;
   quality: QualityMetricsPayload;
   consent: { policyVersion: string; scope: string[] };
+  /** Face crop, kept only if the organization enabled enrollment thumbnails. */
+  thumbnail?: string;
 }
 
 export interface NewSession {
@@ -634,6 +643,8 @@ export interface MeetingMonitoringConfig {
   eventRetentionDays: number;
   transcriptRetentionDays: number;
   alertNotificationsEnabled: boolean;
+  /** Keep a small encrypted face thumbnail with each enrollment. */
+  enrollmentThumbnailsEnabled: boolean;
   /** Bind a starting Zoom meeting to a training session automatically. */
   autoSessionEnabled: boolean;
   /** Let the Meeting-SDK recognition bot join live meetings unattended. */

@@ -13,12 +13,24 @@ import { PhotoBatchEnroll } from "@/components/PhotoBatchEnroll";
 import { formatDateTime, percent } from "@/lib/format";
 import { useCan } from "@/lib/auth-context";
 
-const CONSENT_POLICY_VERSION = "2026-09-01";
-const CONSENT_SCOPE = ["face_template", "monitoring", "evidence_images"];
+/**
+ * Bumped when the consent text changes in substance, so that every stored
+ * consent says which wording the person actually agreed to. 2026-09-26 added
+ * the optional enrolment thumbnail, which is a stored face image and so a new
+ * category rather than a rewording. See /legal/privacy (version 1.1).
+ */
+const CONSENT_POLICY_VERSION = "2026-09-26";
+const CONSENT_SCOPE = [
+  "face_template",
+  "monitoring",
+  "evidence_images",
+  "enrollment_thumbnail",
+];
 
 export function EnrollScreen() {
   const can = useCan();
   const [trainees, setTrainees] = useState<Trainee[]>([]);
+  const [thumbnails, setThumbnails] = useState<Record<string, string>>({});
   const [query, setQuery] = useState("");
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -34,6 +46,18 @@ export function EnrollScreen() {
       .then((r) => {
         setTrainees(r.trainees);
         setError(null);
+        // One batched request for the whole page, and only when there is
+        // something stored to fetch — with thumbnails off nothing is asked
+        // for and nothing is audited.
+        const withImages = r.trainees.filter((t) => t.hasThumbnail).map((t) => t.id);
+        if (!withImages.length) {
+          setThumbnails({});
+          return;
+        }
+        api
+          .traineeThumbnails(withImages)
+          .then((res) => setThumbnails(res.thumbnails))
+          .catch(() => setThumbnails({}));
       })
       .catch((e) => setError(e instanceof ApiClientError ? e.message : "受講者一覧を取得できません"))
       .finally(() => setLoading(false));
@@ -111,7 +135,15 @@ export function EnrollScreen() {
                   <TableRow key={t.id}>
                     <TableCell>
                       <div className="flex items-center gap-3">
-                        <div className="avatar-cell" aria-hidden="true">{t.name.slice(0, 2)}</div>
+                        {thumbnails[t.id] ? (
+                          <img
+                            src={thumbnails[t.id]}
+                            alt=""
+                            className="size-9 shrink-0 rounded-[11px] object-cover"
+                          />
+                        ) : (
+                          <div className="avatar-cell" aria-hidden="true">{t.name.slice(0, 2)}</div>
+                        )}
                         <div className="min-w-0">
                           <div className="truncate font-bold text-slate-900">{t.name}</div>
                           <div className="truncate text-xs text-slate-500">
@@ -173,6 +205,7 @@ function CreateTraineeDialog({
   const [busy, setBusy] = useState(false);
   /** Resets the picker's own state when a new trainee is started. */
   const [pickerKey, setPickerKey] = useState(0);
+  const [newMode, setNewMode] = useState<EnrollMode>("photo");
 
   function reset() {
     setForm(EMPTY_TRAINEE_FORM);
@@ -181,6 +214,7 @@ function CreateTraineeDialog({
     setError(null);
     setReasons([]);
     setEnrolled(null);
+    setNewMode("photo");
     setPickerKey((k) => k + 1);
   }
 
@@ -216,6 +250,7 @@ function CreateTraineeDialog({
       try {
         const r = await api.enroll(created.trainee.id, {
           descriptor: face.result.descriptor,
+          thumbnail: face.result.preview,
           engine: face.result.engine,
           modelVersion: face.result.modelVersion,
           quality: face.result.quality,
@@ -303,7 +338,39 @@ function CreateTraineeDialog({
                 いま登録しない場合は、あとから一覧の「顔登録」でも追加できます。
               </p>
             </div>
-            <FacePicker key={pickerKey} onChange={setFace} busy={busy} compact />
+            <div className="flex gap-1 rounded-xl bg-slate-100 p-1" role="tablist" aria-label="顔写真の取得方法">
+              <ModeTab active={newMode === "photo"} onClick={() => { setNewMode("photo"); setFace(null); }}>
+                <ImagePlus className="size-3.5" />
+                画像から
+              </ModeTab>
+              <ModeTab active={newMode === "camera"} onClick={() => { setNewMode("camera"); setFace(null); }}>
+                <Camera className="size-3.5" />
+                カメラで撮影
+              </ModeTab>
+            </div>
+            {newMode === "photo" ? (
+              <FacePicker key={pickerKey} onChange={setFace} busy={busy} compact />
+            ) : (
+              <>
+                <FaceCapture
+                  key={`cam-${pickerKey}`}
+                  requireLiveness={false}
+                  captureLabel={face ? "撮り直す" : "この顔を使う"}
+                  busy={busy}
+                  onCapture={(result) =>
+                    setFace({ result, warnings: [], fileName: "カメラ撮影" })
+                  }
+                />
+                {face && (
+                  <div className="flex items-center gap-3 rounded-xl border border-slate-200 p-2">
+                    {face.result.preview && (
+                      <img src={face.result.preview} alt="撮影した顔" className="size-16 rounded-xl object-cover" />
+                    )}
+                    <p className="text-sm font-semibold text-slate-700">この顔で登録します</p>
+                  </div>
+                )}
+              </>
+            )}
             {face && (
               <label className="flex items-start gap-2.5 rounded-xl border border-cyan-200 bg-cyan-50/60 p-3 text-sm">
                 <input
@@ -313,8 +380,8 @@ function CreateTraineeDialog({
                   onChange={(e) => setConsent(e.target.checked)}
                 />
                 <span className="text-cyan-900">
-                  受講者本人から、顔情報の処理について同意を取得しました。
-                  （同意文面バージョン {CONSENT_POLICY_VERSION}）
+                  受講者本人から、顔情報の処理と、顔写真サムネイルの保存（有効時）について
+                  同意を取得しました。（同意文面バージョン {CONSENT_POLICY_VERSION}）
                 </span>
               </label>
             )}
@@ -458,6 +525,7 @@ function FaceEnrollDialog({
     try {
       const r = await api.enroll(trainee.id, {
         descriptor: result.descriptor,
+        thumbnail: result.preview,
         engine: result.engine,
         modelVersion: result.modelVersion,
         quality: result.quality,
@@ -511,8 +579,8 @@ function FaceEnrollDialog({
             onChange={(e) => setConsent(e.target.checked)}
           />
           <span className="text-cyan-900">
-            受講者本人から、カメラ利用・顔情報の処理・証跡画像の保存について同意を取得しました。
-            （同意文面バージョン {CONSENT_POLICY_VERSION}）
+            受講者本人から、カメラ利用・顔情報の処理・証跡画像および顔写真サムネイルの保存（有効時）
+            について同意を取得しました。（同意文面バージョン {CONSENT_POLICY_VERSION}）
           </span>
         </label>
 
@@ -531,11 +599,14 @@ function FaceEnrollDialog({
         {consent ? (
           <div className="space-y-3">
             <div className="flex gap-1 rounded-xl bg-slate-100 p-1" role="tablist" aria-label="登録方法">
-              <ModeTab active={mode === "camera"} onClick={() => setMode("camera")}>
+              {/* Switching source clears the previous result: a success card
+                  left standing above a fresh camera preview reads as if the
+                  shot you are about to take has already been registered. */}
+              <ModeTab active={mode === "camera"} onClick={() => { setMode("camera"); setEnrolled(null); }}>
                 <Camera className="size-3.5" />
                 カメラで撮影
               </ModeTab>
-              <ModeTab active={mode === "photo"} onClick={() => setMode("photo")}>
+              <ModeTab active={mode === "photo"} onClick={() => { setMode("photo"); setEnrolled(null); }}>
                 <ImagePlus className="size-3.5" />
                 画像から登録
               </ModeTab>

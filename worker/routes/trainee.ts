@@ -275,20 +275,41 @@ app.post("/session/:participantId/precheck", async (c) => {
         isNull(faceEnrollments.deletedAt),
       ),
     )
-    .orderBy(desc(faceEnrollments.createdAt))
-    .limit(1);
+    .orderBy(desc(faceEnrollments.createdAt));
 
-  const enrollment = enrollmentRows[0];
-  if (!enrollment) throw unprocessable("顔登録が完了していません。管理者にお問い合わせください");
-  if (enrollment.engine !== body.engine) {
+  if (!enrollmentRows.length) {
+    throw unprocessable("顔登録が完了していません。管理者にお問い合わせください");
+  }
+
+  // Only templates from the same engine are comparable at all.
+  const comparable = enrollmentRows.filter((e) => e.engine === body.engine);
+  if (!comparable.length) {
     throw unprocessable(
-      `顔登録時のエンジン（${enrollment.engine}）と異なります。再登録が必要です`,
+      `顔登録時のエンジン（${enrollmentRows[0].engine}）と異なります。再登録が必要です`,
     );
   }
 
+  // Best score across every template the trainee has enrolled.
+  //
+  // A trainee may register several photos — different poses, lighting, with
+  // and without glasses — and the whole point of allowing that is that the
+  // live frame gets compared against all of them. Taking only the newest
+  // would silently discard the others and make a second enrollment actively
+  // harmful whenever it happened to be the least representative shot.
   const live = assertDescriptor(body.descriptor, body.engine);
-  const stored = await unsealDescriptor(enrollment.template, enrollment.templateIv, key);
-  const matchScore = computeMatchScore(live, stored);
+  let matchScore = 0;
+  let compared = 0;
+  for (const candidate of comparable) {
+    let stored: number[];
+    try {
+      stored = await unsealDescriptor(candidate.template, candidate.templateIv, key);
+    } catch {
+      continue; // One unreadable template must not fail the whole check.
+    }
+    compared++;
+    matchScore = Math.max(matchScore, computeMatchScore(live, stored));
+  }
+  if (!compared) throw unprocessable("登録済みの顔特徴量を読み取れませんでした");
   const passed = matchScore >= rules.matchThreshold;
 
   const attempts = participant.precheckAttempts + 1;
