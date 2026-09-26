@@ -131,26 +131,41 @@ export function SettingsScreen() {
           <div className="flex flex-wrap items-center gap-3">
             <span
               className={`inline-flex items-center gap-2 rounded-full border px-3 py-1.5 text-sm font-semibold ${
-                zoom?.connected
-                  ? "border-emerald-200 bg-emerald-50 text-emerald-700"
-                  : "border-slate-200 bg-slate-50 text-slate-600"
+                zoom?.reauthRequired
+                  ? "border-amber-200 bg-amber-50 text-amber-800"
+                  : zoom?.connected
+                    ? "border-emerald-200 bg-emerald-50 text-emerald-700"
+                    : "border-slate-200 bg-slate-50 text-slate-600"
               }`}
             >
               {zoom?.connected ? <Check className="size-4" /> : <Link2 className="size-4" />}
-              {zoom?.connected ? "接続済み" : "未接続"}
+              {zoom?.reauthRequired ? "再接続が必要" : zoom?.connected ? "接続済み" : "未接続"}
             </span>
             {zoom?.integration?.connectedAt && (
               <span className="text-xs text-slate-500">
                 接続日時 {formatDateTime(zoom.integration.connectedAt)}
               </span>
             )}
-            {!zoom?.connected && can("integration:manage") && (
+            {(!zoom?.connected || zoom?.reauthRequired) && can("integration:manage") && (
               <Button size="sm" className="gap-1.5" onClick={() => void connectZoom()} disabled={!zoom?.configured}>
                 <ExternalLink className="size-3.5" />
-                Zoomアカウントを接続
+                {zoom?.reauthRequired ? "Zoomに再接続" : "Zoomアカウントを接続"}
               </Button>
             )}
           </div>
+
+          {zoom?.reauthRequired && (
+            <div className="rounded-xl border border-amber-200 bg-amber-50 px-3 py-2.5 text-sm text-amber-800">
+              <div className="font-semibold">Zoomに再接続してください</div>
+              <p className="mt-1">
+                アクセストークンは発行時点の権限（スコープ）を保持します。Zoom Marketplace
+                でスコープを追加しても、既存のトークンには反映されません。
+              </p>
+              <p className="mt-1">
+                未付与: <code className="break-all">{zoom.missingScopes.join(", ")}</code>
+              </p>
+            </div>
+          )}
 
           {!zoom?.configured && (
             <div className="rounded-xl border border-amber-200 bg-amber-50 px-3 py-2.5 text-sm text-amber-800">
