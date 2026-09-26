@@ -239,8 +239,10 @@ export function PhotoBatchEnroll({
               });
               continue;
             }
+            const thumbnail = faceThumbnail(analysis.canvas, analysis.primary.box);
             const res = await api.enroll(traineeId, {
               descriptor: descriptorToArray(analysis.primary.descriptor),
+              thumbnail,
               engine: ENGINE_ID,
               modelVersion: MODEL_VERSION,
               quality: analysis.quality,
@@ -250,7 +252,7 @@ export function PhotoBatchEnroll({
               outcome: "enrolled",
               detail: "登録しました",
               quality: res.enrollment.qualityScore,
-              thumbnail: faceThumbnail(analysis.canvas, analysis.primary.box),
+              thumbnail,
             });
           } catch (err) {
             let detail = "登録に失敗しました";
@@ -418,7 +420,8 @@ export function PhotoBatchEnroll({
                 onChange={(e) => setConsent(e.target.checked)}
               />
               <span className="text-cyan-900">
-                対象の受講者全員から、顔情報の処理について同意を取得しました。
+                対象の受講者全員から、顔情報の処理と、顔写真サムネイルの保存（有効時）について
+                同意を取得しました。
                 （同意文面バージョン {consentPolicyVersion}）
               </span>
             </label>

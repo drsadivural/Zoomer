@@ -13,7 +13,7 @@
 <header><div class="wrap">
   <a class="brand" href="/legal/"><div class="mark">A</div><div><div class="brand-name">AYONIX</div><div class="brand-sub">ZOOMER</div></div></a>
   <h1>Privacy Policy</h1>
-  <p class="meta">Version 1.0 · Effective 25 September 2026 · Ayonix Corporation</p>
+  <p class="meta">Version 1.1 · Effective 26 September 2026 · Ayonix Corporation</p>
   <nav class="crumbs">
     <a href="/legal/">All policies</a><a href="/legal/security/">Security</a>
     <a href="/legal/incident-response/">Incident response</a><a href="/legal/vulnerability-management/">Vulnerability management</a>
@@ -49,6 +49,7 @@
     <thead><tr><th>Data</th><th>Purpose</th><th>Retention</th></tr></thead>
     <tbody>
       <tr><td><strong>Face template</strong> — a numeric vector derived from an enrolment photograph. Not an image, and the original photograph is not kept.</td><td>Verify that the person attending is the person enrolled.</td><td>Until the trainee record is deleted, or on request.</td></tr>
+      <tr><td><strong>Enrolment thumbnail</strong> — a small cropped face image kept with a registration, so an administrator can see who is enrolled.</td><td>Let an administrator confirm a template is attached to the right person.</td><td><strong>Disabled by default.</strong> When enabled, kept for the life of the registration and deleted with it.</td></tr>
       <tr><td><strong>Trainee record</strong> — name, trainee ID, department, email.</td><td>Identify who a course result belongs to.</td><td>Controlled by the customer.</td></tr>
       <tr><td><strong>Monitoring events</strong> — timestamped observations such as "face not visible", "camera off", "identity not confirmed".</td><td>Attendance evidence and host alerting.</td><td>Configurable; 90 days by default.</td></tr>
       <tr><td><strong>Analysis samples</strong> — per-sample results of face analysis.</td><td>Produce the attendance report.</td><td>Configurable; 14 days by default.</td></tr>
@@ -74,7 +75,7 @@
   </p>
   <ul>
     <li>Enrolment requires the trainee's <strong>explicit, recorded consent</strong>, captured in the product with the version of the consent text the person actually saw.</li>
-    <li>Consent is <strong>revocable</strong>. Withdrawing it stops further processing and triggers deletion of the template.</li>
+    <li>Consent is <strong>revocable</strong>. Withdrawing it stops further processing and triggers deletion of the template and of any stored enrolment thumbnail.</li>
     <li>Customers are responsible for notifying participants that identity verification is in use before a session begins.</li>
   </ul>
 </section>
@@ -82,12 +83,13 @@
 <section>
   <h2>4. How the data is protected</h2>
   <ul>
-    <li>Face templates, OAuth tokens and evidence images are encrypted at rest with <strong>AES-256-GCM</strong>.</li>
+    <li>Face templates, OAuth tokens, evidence images and enrolment thumbnails are encrypted at rest with <strong>AES-256-GCM</strong>.</li>
     <li><strong>Templates are never sent to a browser.</strong> Comparison happens server-side, so a tampered client cannot assert a match.</li>
     <li>Evidence images are reachable only through <strong>HMAC-signed links that expire after 60 seconds</strong>, and every access is written to the audit log.</li>
     <li>All traffic uses <strong>TLS 1.2 or higher</strong>; TLS 1.0 and 1.1 are refused.</li>
     <li>Each customer is a separate tenant. Every record carries an organisation identifier and every query is filtered by it.</li>
     <li>Access is role-based. Viewing an evidence image and exporting evidence in bulk are deliberately separate permissions.</li>
+    <li><strong>Enrolment thumbnails are off by default</strong>, and with them off no face image is stored anywhere in the product. When an organisation turns them on, viewing one requires the same permission as viewing an evidence image, every retrieval is written to the audit log, and deleting a registration deletes the stored image itself rather than merely hiding it.</li>
   </ul>
   <p>Further detail, including known limitations, is in our <a href="/legal/security/">Security Policy</a>.</p>
 </section>
@@ -176,9 +178,10 @@
   </p>
   <ul>
     <li>顔の原画像は保存せず、暗号化した特徴量のみを保存します（AES-256-GCM）。</li>
+    <li><strong>顔写真サムネイルの保存は既定で無効です。</strong>既定の設定では、顔の画像はいかなる形でも保存されません。組織の管理者が有効化した場合に限り、顔登録時の小さな顔画像（サムネイル）を暗号化して保存し（AES-256-GCM）、受講者一覧での本人確認に使用します。閲覧には <code>evidence:view</code> 権限が必要で、閲覧はすべて監査ログに記録されます。顔登録を削除すると、サムネイルの実データも同時に削除されます。</li>
     <li>特徴量をブラウザへ送信することはありません。照合はサーバー側で実行します。</li>
     <li>証跡画像の保存は既定で無効です。有効化した場合も、60秒で失効する署名URL経由でのみ閲覧でき、閲覧はすべて監査ログに記録されます。</li>
-    <li>顔情報の登録には本人の明示的な同意が必要で、同意はいつでも撤回できます。撤回により特徴量は削除されます。</li>
+    <li>顔情報の登録には本人の明示的な同意が必要で、同意はいつでも撤回できます。撤回により特徴量およびサムネイルは削除されます。</li>
     <li>自動判定のみで受講可否を決定することはありません。理解度・集中度・感情などの心理状態は判定しません。</li>
     <li>通信はすべて TLS 1.2 以上です。データはCloudflareのAPACリージョンに保存されます。</li>
   </ul>

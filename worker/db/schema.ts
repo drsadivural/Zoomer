@@ -111,7 +111,12 @@ export const faceEnrollments = sqliteTable(
     dimensions: integer("dimensions").notNull(),
     qualityScore: real("quality_score").notNull(),
     qualityDetail: text("quality_detail", { mode: "json" }).$type<Record<string, number | boolean>>(),
+    /** R2 key of the encrypted enrollment thumbnail, when the organization has
+     *  opted in. Null — and nothing stored — otherwise. */
     imageKey: text("image_key"),
+    /** SHA-256 over the ciphertext, for tamper detection. */
+    imageSha256: text("image_sha256"),
+    imageContentType: text("image_content_type"),
     status: text("status").notNull().default("ACTIVE"),
     createdAt: integer("created_at").notNull().default(now),
     createdBy: text("created_by"),
@@ -785,6 +790,18 @@ export const meetingMonitoringSettings = sqliteTable("meeting_monitoring_setting
   transcriptRetentionDays: integer("transcript_retention_days").notNull().default(30),
 
   alertNotificationsEnabled: integer("alert_notifications_enabled", { mode: "boolean" }).notNull().default(true),
+
+  /**
+   * Store a small face thumbnail with each enrollment so administrators can
+   * see who is registered.
+   *
+   * Off by default, and deliberately so: with it off the product stores no
+   * face image at all, only encrypted templates. Turning it on is a privacy
+   * decision for the organization, and /legal/privacy describes both states.
+   */
+  enrollmentThumbnailsEnabled: integer("enrollment_thumbnails_enabled", { mode: "boolean" })
+    .notNull()
+    .default(false),
 
   /** Bind a starting Zoom meeting to a training session without being asked. */
   autoSessionEnabled: integer("auto_session_enabled", { mode: "boolean" }).notNull().default(true),

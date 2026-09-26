@@ -175,6 +175,7 @@ const configSchema = z
 
     alertNotificationsEnabled: z.boolean(),
 
+    enrollmentThumbnailsEnabled: z.boolean(),
     autoSessionEnabled: z.boolean(),
     botAutoJoinEnabled: z.boolean(),
   })

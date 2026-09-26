@@ -1,8 +1,10 @@
-import { and, desc, eq, isNull, like, or, sql } from "drizzle-orm";
+import { and, asc, desc, eq, inArray, isNull, like, or, sql } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/d1";
 import { Hono } from "hono";
 import { z } from "zod";
 import { consents, faceEnrollments, trainees } from "../db/schema";
+import { b64encode, decodeDataUrl, getDecrypted, putEncrypted } from "../lib/evidence";
+import { getMeetingConfig } from "../services/monitoring/config";
 import { recordAudit } from "../lib/audit";
 import { getActor, requireAuth, requirePermission } from "../lib/auth";
 import { withIdempotency } from "../lib/idempotency";
@@ -14,6 +16,15 @@ import { newId } from "../lib/ids";
 import type { Env, Variables } from "../types";
 
 const app = new Hono<{ Bindings: Env; Variables: Variables }>();
+
+/**
+ * Most active face templates kept per trainee.
+ *
+ * Enough for a useful spread of poses and lighting; small enough that a 1:N
+ * identify across a whole organization stays cheap, since every template is
+ * one more comparison for every participant in every meeting.
+ */
+const MAX_ACTIVE_ENROLLMENTS = 8;
 app.use("*", requireAuth);
 app.use("*", withIdempotency());
 
@@ -59,6 +70,12 @@ app.get("/", requirePermission("trainee:read"), async (c) => {
         select count(*) from face_enrollments fe
         where fe.trainee_id = trainees.id
           and fe.status = 'ACTIVE' and fe.deleted_at is null
+      )`,
+      hasThumbnail: sql<number>`(
+        select count(*) from face_enrollments fe
+        where fe.trainee_id = trainees.id
+          and fe.status = 'ACTIVE' and fe.deleted_at is null
+          and fe.image_key is not null
       )`,
       lastQuality: sql<number | null>`(
         select fe.quality_score from face_enrollments fe
@@ -356,6 +373,79 @@ app.post("/import", requirePermission("trainee:write"), async (c) => {
 
 /* ---------------------------------------------------------- enrollments */
 
+/* ------------------------------------------------------- face thumbnails */
+
+const thumbnailsSchema = z.object({
+  traineeIds: z.array(z.string().min(1)).min(1).max(200),
+});
+
+/**
+ * Returns the stored face thumbnail for each requested trainee.
+ *
+ * Batched rather than one request per row: a roster of 200 people would
+ * otherwise be 200 requests and 200 audit entries for what is, to the
+ * operator, a single act of looking at the list.
+ *
+ * Gated on `evidence:view` because a face crop is biometric imagery, not
+ * decoration, and on the organization having opted in — with thumbnails off
+ * there is nothing stored to return.
+ */
+app.post("/thumbnails", requirePermission("evidence:view"), async (c) => {
+  const actor = getActor(c);
+  const key = c.env.DATA_ENCRYPTION_KEY;
+  if (!key) throw serverError("DATA_ENCRYPTION_KEY が未設定です");
+
+  const body = await parseBody(c, thumbnailsSchema);
+  const config = await getMeetingConfig(c.env.DB, actor.organizationId);
+  if (!config.enrollmentThumbnailsEnabled) {
+    return c.json({ thumbnails: {}, enabled: false });
+  }
+
+  const db = drizzle(c.env.DB);
+  const rows = await db
+    .select({
+      traineeId: faceEnrollments.traineeId,
+      imageKey: faceEnrollments.imageKey,
+      createdAt: faceEnrollments.createdAt,
+    })
+    .from(faceEnrollments)
+    .where(
+      and(
+        eq(faceEnrollments.organizationId, actor.organizationId),
+        inArray(faceEnrollments.traineeId, body.traineeIds),
+        eq(faceEnrollments.status, "ACTIVE"),
+        isNull(faceEnrollments.deletedAt),
+      ),
+    )
+    .orderBy(desc(faceEnrollments.createdAt));
+
+  // Newest enrolled photo per trainee; the rest are alternate poses.
+  const newest = new Map<string, string>();
+  for (const r of rows) {
+    if (r.imageKey && !newest.has(r.traineeId)) newest.set(r.traineeId, r.imageKey);
+  }
+
+  const thumbnails: Record<string, string> = {};
+  for (const [traineeId, objectKey] of newest) {
+    const stored = await getDecrypted(c.env.EVIDENCE, objectKey, key);
+    // A missing object is not an error: retention or a deletion may have
+    // removed it, and the row is repaired on the next enrollment.
+    if (!stored) continue;
+    thumbnails[traineeId] = `data:${stored.contentType};base64,${b64encode(stored.bytes)}`;
+  }
+
+  await recordAudit(c.env.DB, {
+    organizationId: actor.organizationId,
+    actorId: actor.userId,
+    action: "enrollment.thumbnails.view",
+    resourceType: "face_enrollment",
+    metadata: { requested: body.traineeIds.length, served: Object.keys(thumbnails).length },
+    requestId: c.get("requestId"),
+  });
+
+  return c.json({ thumbnails, enabled: true });
+});
+
 const enrollSchema = z.object({
   descriptor: z.array(z.number()).min(64).max(1024),
   engine: z.string().min(1).max(64),
@@ -373,6 +463,13 @@ const enrollSchema = z.object({
     policyVersion: z.string().min(1),
     scope: z.array(z.string()).min(1),
   }),
+  /**
+   * Optional data: URL of a small face crop, kept only when the organization
+   * has turned enrollment thumbnails on. The client always offers it; the
+   * server decides whether to keep it, so the privacy setting cannot be
+   * bypassed by a client that simply stops asking.
+   */
+  thumbnail: z.string().max(400_000).optional(),
 });
 
 app.post("/:id/enrollments", requirePermission("enrollment:write"), async (c) => {
@@ -417,17 +514,61 @@ app.post("/:id/enrollments", requirePermission("enrollment:write"), async (c) =>
   const sealed = await sealDescriptor(descriptor, key);
   const enrollmentId = newId("enrollment");
 
-  // One active template per trainee: supersede the previous one.
-  await db
-    .update(faceEnrollments)
-    .set({ status: "SUPERSEDED" })
+  // Several active templates per trainee, not one.
+  //
+  // A single template is a single pose under a single light. Enrolling a few
+  // photos — front, slight left, slight right, with and without glasses — is
+  // what makes recognition hold up in a real meeting, and both comparison
+  // paths already take the best score across a trainee's templates.
+  //
+  // Bounded, because every extra template is work on every 1:N identify and
+  // the returns fall away quickly. The oldest is superseded once the cap is
+  // reached, so enrolling never fails for want of a slot.
+  const active = await db
+    .select({ id: faceEnrollments.id })
+    .from(faceEnrollments)
     .where(
       and(
         eq(faceEnrollments.traineeId, traineeId),
         eq(faceEnrollments.organizationId, actor.organizationId),
         eq(faceEnrollments.status, "ACTIVE"),
+        isNull(faceEnrollments.deletedAt),
       ),
-    );
+    )
+    .orderBy(asc(faceEnrollments.createdAt));
+
+  const overflow = active.slice(0, Math.max(0, active.length + 1 - MAX_ACTIVE_ENROLLMENTS));
+  for (const row of overflow) {
+    await db
+      .update(faceEnrollments)
+      .set({ status: "SUPERSEDED" })
+      .where(eq(faceEnrollments.id, row.id));
+  }
+
+  // Encrypted at rest under the same key and helper as evidence images, and
+  // only when the organization has opted in. With the setting off nothing is
+  // written and `image_key` stays null, which is the shipped default.
+  const config = await getMeetingConfig(c.env.DB, actor.organizationId);
+  let image: { key: string; sha256: string; contentType: string } | null = null;
+  if (config.enrollmentThumbnailsEnabled && body.thumbnail) {
+    try {
+      const { bytes, contentType } = decodeDataUrl(body.thumbnail);
+      const objectKey = `${actor.organizationId}/enrollments/${enrollmentId}.bin`;
+      const { sha256 } = await putEncrypted(c.env.EVIDENCE, objectKey, bytes, key, contentType);
+      image = { key: objectKey, sha256, contentType };
+    } catch (err) {
+      // A thumbnail is a convenience. Losing it must never cost the template,
+      // which is the thing identity actually depends on.
+      console.warn(
+        JSON.stringify({
+          level: "warn",
+          message: "enrollment thumbnail store failed",
+          traineeId,
+          error: err instanceof Error ? err.message : "unknown",
+        }),
+      );
+    }
+  }
 
   await db.insert(faceEnrollments).values({
     id: enrollmentId,
@@ -440,6 +581,9 @@ app.post("/:id/enrollments", requirePermission("enrollment:write"), async (c) =>
     dimensions: descriptor.length,
     qualityScore: quality.score,
     qualityDetail: { ...body.quality, passed: quality.passed },
+    imageKey: image?.key ?? null,
+    imageSha256: image?.sha256 ?? null,
+    imageContentType: image?.contentType ?? null,
     createdBy: actor.userId,
   });
 
@@ -458,7 +602,12 @@ app.post("/:id/enrollments", requirePermission("enrollment:write"), async (c) =>
     action: "enrollment.create",
     resourceType: "face_enrollment",
     resourceId: enrollmentId,
-    metadata: { traineeId, qualityScore: quality.score, engine: body.engine },
+    metadata: {
+      traineeId,
+      qualityScore: quality.score,
+      engine: body.engine,
+      thumbnailStored: Boolean(image),
+    },
     requestId: c.get("requestId"),
   });
 
@@ -469,6 +618,18 @@ app.delete("/:id/enrollments/:enrollmentId", requirePermission("enrollment:write
   const actor = getActor(c);
   const db = drizzle(c.env.DB);
   const enrollmentId = c.req.param("enrollmentId");
+
+  const existingRows = await db
+    .select({ imageKey: faceEnrollments.imageKey })
+    .from(faceEnrollments)
+    .where(
+      and(
+        eq(faceEnrollments.id, enrollmentId),
+        eq(faceEnrollments.organizationId, actor.organizationId),
+      ),
+    )
+    .limit(1);
+  const existing = existingRows[0];
 
   const result = await db
     .update(faceEnrollments)
@@ -482,6 +643,27 @@ app.delete("/:id/enrollments/:enrollmentId", requirePermission("enrollment:write
       ),
     );
   if (!result.meta.changes) throw notFound("顔登録が見つかりません");
+
+  // Delete the thumbnail bytes outright rather than only marking the row.
+  // Withdrawing a face registration has to remove the face, not hide it.
+  if (existing?.imageKey) {
+    try {
+      await c.env.EVIDENCE.delete(existing.imageKey);
+      await db
+        .update(faceEnrollments)
+        .set({ imageKey: null, imageSha256: null, imageContentType: null })
+        .where(eq(faceEnrollments.id, enrollmentId));
+    } catch (err) {
+      console.error(
+        JSON.stringify({
+          level: "error",
+          message: "enrollment thumbnail delete failed",
+          enrollmentId,
+          error: err instanceof Error ? err.message : "unknown",
+        }),
+      );
+    }
+  }
 
   await recordAudit(c.env.DB, {
     organizationId: actor.organizationId,

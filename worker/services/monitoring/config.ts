@@ -60,6 +60,8 @@ export interface MeetingMonitoringConfig {
 
   alertNotificationsEnabled: boolean;
 
+  /** Keep a small encrypted face thumbnail with each enrollment. Off by default. */
+  enrollmentThumbnailsEnabled: boolean;
   /** Create a training session automatically when a Zoom meeting starts (§Zoom bot). */
   autoSessionEnabled: boolean;
   /** Allow the recognition bot to join live meetings unattended. */
@@ -120,6 +122,10 @@ export const DEFAULT_MEETING_CONFIG: MeetingMonitoringConfig = {
   // On by default: without them, starting a meeting in the connected Zoom
   // account produces an empty ライブ監視 screen, which reads as a broken
   // product rather than as a feature nobody switched on.
+  // Off: with this off the product stores no face image anywhere, only
+  // encrypted templates. Enabling it is the organization's decision.
+  enrollmentThumbnailsEnabled: false,
+
   autoSessionEnabled: true,
   botAutoJoinEnabled: true,
 };

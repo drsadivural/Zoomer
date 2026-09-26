@@ -32,6 +32,11 @@ const FEATURES: { key: BooleanKey; label: string; hint: string }[] = [
   { key: "participationAnalyticsEnabled", label: "参加状況の集計", hint: "発話時間・発話回数を集計します" },
   { key: "transcriptEnabled", label: "文字起こし解析", hint: "Zoomの文字起こしが利用可能な場合のみ（任意）" },
   {
+    key: "enrollmentThumbnailsEnabled",
+    label: "顔写真サムネイルの保存",
+    hint: "受講者一覧に顔写真を表示するため、登録時の小さな顔画像を暗号化して保存します。無効の場合、顔画像は一切保存されません（既定）",
+  },
+  {
     key: "autoSessionEnabled",
     label: "Zoom会議の自動取り込み",
     hint: "連携中のZoomアカウントで会議が開始されたとき、対応する研修を自動作成して参加者を取り込みます",
