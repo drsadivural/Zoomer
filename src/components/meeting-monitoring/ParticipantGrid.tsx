@@ -14,9 +14,13 @@ import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import type { MeetingParticipant } from "@/lib/api";
 import { EmptyState } from "@/components/shell/primitives";
 import { ParticipantCard } from "./ParticipantCard";
+import { useEnrolledThumbnails } from "@/lib/meeting/use-enrolled-thumbnails";
 
 const CARD_MIN_WIDTH = 220;
-const CARD_HEIGHT = 300;
+// Image (4:3 of a ~220px column) plus the one name row beneath it. The
+// attribute block that used to sit under the name is now an icon strip inside
+// the image, so the card is shorter than it was.
+const CARD_HEIGHT = 240;
 const GAP = 16;
 const OVERSCAN_ROWS = 2;
 
@@ -35,6 +39,8 @@ export function ParticipantGrid({
   emptyTitle = "該当する参加者がいません",
   emptyDescription = "フィルターを変更するか、解析を開始してください。",
 }: ParticipantGridProps) {
+  const enrolled = useEnrolledThumbnails(participants, canViewEvidence);
+
   const containerRef = useRef<HTMLDivElement>(null);
   const [width, setWidth] = useState(0);
   const [scrollTop, setScrollTop] = useState(0);
@@ -108,6 +114,7 @@ export function ParticipantGrid({
               now={nowBucket}
               onOpen={onOpen}
               canViewEvidence={canViewEvidence}
+              enrolledThumbnails={enrolled}
             />
           </div>
         ))}

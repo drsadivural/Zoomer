@@ -46,6 +46,7 @@ function participant(over: Partial<MeetingParticipant> = {}): MeetingParticipant
     analysisTier: "NORMAL",
     thumbnailEvidenceId: null,
     thumbnailAt: null,
+    traineeId: "trn_1",
     traineeName: "佐藤 花子",
     externalId: "AZ-0001",
     department: null,
