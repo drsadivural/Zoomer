@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { useSearchParams } from "react-router-dom";
-import { Check, Copy, ExternalLink, Link2, ShieldCheck, SlidersHorizontal, Unlink } from "lucide-react";
+import { Check, ChevronRight, Copy, ExternalLink, Link2, ShieldCheck, SlidersHorizontal, Unlink } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Switch } from "@/components/ui/switch";
@@ -173,26 +173,7 @@ export function SettingsScreen() {
             </div>
           )}
 
-          <div className="rounded-xl border border-slate-200 bg-slate-50 p-4">
-            <p className="text-sm font-bold text-slate-800">Zoom Marketplace に登録する値</p>
-            <p className="mt-1 text-xs text-slate-500">
-              Zoomアプリの設定画面で、以下のURLを登録してください。値が完全に一致しない場合、
-              認可時に <code>4700 Invalid redirect</code> になります。
-            </p>
-            <div className="mt-3 space-y-2">
-              <CopyRow label="OAuth Redirect URL" value={zoom?.redirectUri ?? ""} />
-              <CopyRow label="Event notification endpoint URL" value={zoom?.webhookUrl ?? ""} />
-            </div>
-            <p className="mt-3 text-xs text-slate-500">
-              購読するイベント: <code>meeting.started</code>, <code>meeting.ended</code>,{" "}
-              <code>meeting.participant_joined</code>, <code>meeting.participant_left</code>
-              {zoom && !zoom.webhookConfigured && (
-                <span className="ml-1 font-semibold text-amber-600">
-                  （Secret Token が未設定のため、現在Webhookは受信できません）
-                </span>
-              )}
-            </p>
-          </div>
+          <MarketplaceValues zoom={zoom} />
         </div>
       </AppCard>
 
@@ -264,6 +245,61 @@ export function SettingsScreen() {
       {/* Zoom Organizer Intelligence layer — additive section, own version counter. */}
       <MeetingMonitoringSettingsCard />
     </>
+  );
+}
+
+/**
+ * The URLs to paste into Zoom Marketplace.
+ *
+ * Needed exactly once, when the app is first registered, and never again —
+ * but it was sitting open above the settings an operator actually uses day to
+ * day. Collapsed by default, and opened on arrival only while it still has
+ * something to say: no webhook secret means events cannot be received at all,
+ * and that is a setup step, not a preference.
+ */
+function MarketplaceValues({ zoom }: { zoom: ZoomStatus | null }) {
+  const needsSetup = !zoom?.connected || !zoom?.webhookConfigured;
+  const [open, setOpen] = useState(needsSetup);
+
+  return (
+    <div className="rounded-xl border border-slate-200 bg-slate-50">
+      <button
+        type="button"
+        aria-expanded={open}
+        onClick={() => setOpen((v) => !v)}
+        className="flex w-full items-center gap-2 rounded-xl px-4 py-3 text-left hover:bg-slate-100"
+      >
+        <ChevronRight className={`size-4 shrink-0 text-slate-500 transition-transform ${open ? "rotate-90" : ""}`} />
+        <span className="text-sm font-bold text-slate-800">Zoom Marketplace に登録する値</span>
+        {zoom && !zoom.webhookConfigured && (
+          <span className="rounded-full border border-amber-200 bg-amber-50 px-2 py-0.5 text-xs font-semibold text-amber-700">
+            要設定
+          </span>
+        )}
+      </button>
+
+      {open && (
+        <div className="border-t border-slate-200 p-4">
+          <p className="text-xs text-slate-500">
+            Zoomアプリの設定画面で、以下のURLを登録してください。値が完全に一致しない場合、
+            認可時に <code>4700 Invalid redirect</code> になります。
+          </p>
+          <div className="mt-3 space-y-2">
+            <CopyRow label="OAuth Redirect URL" value={zoom?.redirectUri ?? ""} />
+            <CopyRow label="Event notification endpoint URL" value={zoom?.webhookUrl ?? ""} />
+          </div>
+          <p className="mt-3 text-xs text-slate-500">
+            購読するイベント: <code>meeting.started</code>, <code>meeting.ended</code>,{" "}
+            <code>meeting.participant_joined</code>, <code>meeting.participant_left</code>
+            {zoom && !zoom.webhookConfigured && (
+              <span className="ml-1 font-semibold text-amber-600">
+                （Secret Token が未設定のため、現在Webhookは受信できません）
+              </span>
+            )}
+          </p>
+        </div>
+      )}
+    </div>
   );
 }
 
