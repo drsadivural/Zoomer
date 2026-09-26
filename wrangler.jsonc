@@ -15,10 +15,30 @@
   "workers_dev": true,
 
   // SPA: unknown paths fall through to index.html so client routing works.
+  //
+  // `run_worker_first` is load-bearing, not tuning. The SPA fallback applies to
+  // any request a browser makes as a top-level navigation — Cloudflare decides
+  // on `Sec-Fetch-Mode: navigate`, not on the path — so WITHOUT this the asset
+  // layer answered `/api/*` navigations with index.html and the Worker never
+  // ran. XHR and fetch were unaffected, which is why the whole API looked
+  // healthy: only a browser *navigating* to an API URL hit it.
+  //
+  // The one place the product navigates to an API URL is the Zoom OAuth
+  // callback, and it broke completely and silently: Zoom redirected the
+  // browser to /api/v1/integrations/zoom/oauth/callback, Cloudflare served the
+  // dashboard HTML, the router found no match and sent the user to "/", and no
+  // token was ever exchanged. Reproduce with:
+  //   curl -si -H 'Sec-Fetch-Mode: navigate' https://…/api/v1/auth/me   # 200 text/html
+  //   curl -si                              https://…/api/v1/auth/me   # 401 json
+  //
+  // Scoped to /api/* so every document route keeps being served by the asset
+  // layer, which is what applies public/_headers — the security headers Zoom's
+  // OWASP check requires.
   "assets": {
     "directory": "dist/client",
     "binding": "ASSETS",
-    "not_found_handling": "single-page-application"
+    "not_found_handling": "single-page-application",
+    "run_worker_first": ["/api/*"]
   },
 
   // Storage is pinned to APAC for Japanese data-residency review

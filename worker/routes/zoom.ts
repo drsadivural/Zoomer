@@ -73,6 +73,9 @@ app.get("/authorize", requireAuth, requirePermission("integration:manage"), asyn
  * otherwise indistinguishable from "Zoom never called us", and those two have
  * completely different fixes.
  */
+/** How long an authorization may take from first click to callback. */
+const STATE_TTL_MS = 30 * 60 * 1000;
+
 app.get("/oauth/callback", async (c) => {
   const fail = (stage: string, reason: string) => {
     console.warn(
@@ -117,8 +120,15 @@ app.get("/oauth/callback", async (c) => {
 
   const expected = await hmacSha256Base64(signingKey, `${parsed.o}:${parsed.u}:${parsed.t}`);
   if (!timingSafeEqual(expected, parsed.s)) return fail("state", "stateの署名が一致しません");
-  if (Date.now() - parsed.t > 10 * 60 * 1000) {
-    return fail("state", "認可フローの有効期限が切れています（10分）。もう一度お試しください");
+  // 30 minutes, not 10. The window has to cover everything between clicking
+  // "connect" and Zoom redirecting back: signing in to Zoom, two-factor, and
+  // possibly an administrator approving the app. Ten minutes was short enough
+  // that a normal first-time sign-in could exhaust it, turning a working setup
+  // into "the flow expired". The state is HMAC-signed and binds the
+  // organization and user, so the window bounds replay rather than being the
+  // only thing preventing it.
+  if (Date.now() - parsed.t > STATE_TTL_MS) {
+    return fail("state", "認可フローの有効期限が切れています（30分）。もう一度お試しください");
   }
 
   let tokens;
