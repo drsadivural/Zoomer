@@ -759,6 +759,7 @@ export interface MeetingParticipant {
   analysisTier: string;
   thumbnailEvidenceId: string | null;
   thumbnailAt: number | null;
+  traineeId: string | null;
   traineeName: string | null;
   externalId: string | null;
   department: string | null;

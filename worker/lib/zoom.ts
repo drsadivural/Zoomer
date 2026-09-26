@@ -21,6 +21,13 @@ export const ZOOM_SCOPES = [
   "meeting:write:meeting",
   "meeting:read:list_meetings",
   "meeting:read:participant",
+  // Required by `listPastParticipants`, which backs 参加者を同期. It was
+  // being called without ever being requested, so that sync could only fail
+  // with a Zoom scope error. It is the only roster endpoint available on a
+  // Pro plan — the live equivalent is a Dashboard API that needs Business —
+  // so after a meeting ends this is what completes an attendance record that
+  // missed webhooks.
+  "meeting:read:list_past_participants",
   "user:read:user",
 ] as const;
 

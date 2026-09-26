@@ -502,6 +502,8 @@ app.get("/:id/participants", requirePermission("monitoring:read"), async (c) => 
       analysisTier: sql<string>`coalesce(${participantAnalysisState.analysisTier}, 'NORMAL')`,
       thumbnailEvidenceId: participantAnalysisState.thumbnailEvidenceId,
       thumbnailAt: participantAnalysisState.thumbnailAt,
+      /** Needed to fetch the enrolment thumbnail when no live frame exists. */
+      traineeId: sessionParticipants.traineeId,
       traineeName: trainees.name,
       externalId: trainees.externalId,
       department: trainees.department,
@@ -649,6 +651,8 @@ app.get("/:id/events", requirePermission("monitoring:read"), async (c) => {
       alertId: participantEngagementEvents.alertId,
       occurrences: participantEngagementEvents.occurrences,
       displayName: participantAnalysisState.displayName,
+      /** Needed to fetch the enrolment thumbnail when no live frame exists. */
+      traineeId: sessionParticipants.traineeId,
       traineeName: trainees.name,
       externalId: trainees.externalId,
     })
