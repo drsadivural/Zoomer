@@ -35,6 +35,7 @@
 #include "video_delegate.hpp"
 #include "yuv_jpeg.hpp"
 
+#include <algorithm>
 #include <atomic>
 #include <chrono>
 #include <cstdio>
@@ -376,6 +377,9 @@ gboolean doLeave(gpointer) {
 /* -------------------------------------------------------------- analysis */
 
 /** Builds one observation for a participant, or nothing if it is not due. */
+/** Trailing window the blink rate is computed over. */
+constexpr double kBlinkWindowSec = 60.0;
+
 bool buildObservation(ParticipantState& st, const Assignment& a, json* out) {
   const bool wantSnapshot = a.snapshotsEnabled && g_cfg.snapshot_interval_sec > 0 &&
                             secondsSince(st.lastSnapshot) >= g_cfg.snapshot_interval_sec;
@@ -441,6 +445,15 @@ bool buildObservation(ParticipantState& st, const Assignment& a, json* out) {
     o["roll"] = p.value("roll", 0.0);
     o["eyeClosed"] = p.value("eyeClosed", false);
     o["eyeOpenness"] = p.value("eyeOpenness", 0.0);
+    if (p.contains("sharpness")) o["sharpness"] = p.value("sharpness", 0.0);
+  }
+
+  // Omitted, not zeroed, until a full window has elapsed: the console renders
+  // an absent rate as 未測定 and a present one as fact, so reporting 0.0 from
+  // three seconds of sampling would be a confident wrong answer.
+  if (st.blinkWindowReady) {
+    o["blinkRatePerMin"] = static_cast<double>(st.blinkTimes.size()) * (60.0 / kBlinkWindowSec);
+    o["blinkCount"] = st.blinkCount;
   }
 
   if (identify && r.contains("identity") && !r["identity"].is_null()) {
@@ -480,6 +493,72 @@ bool buildObservation(ParticipantState& st, const Assignment& a, json* out) {
 
   *out = std::move(o);
   return true;
+}
+
+/**
+ * Samples eye state fast enough to see a blink, and converts closed->open
+ * transitions into a rate.
+ *
+ * Separate from `analysisLoop` because the two run at incompatible rates: a
+ * full analysis (pose solve + identity + sharpness) costs tens of milliseconds
+ * and runs every `observeIntervalSec`, while a blink needs ~10 samples a
+ * second to be seen at all. Sharing the cadence would mean either missing
+ * every blink or running identity ten times a second.
+ *
+ * A blink is counted on the *closing* edge, so a participant who simply has
+ * their eyes shut for ten seconds contributes one blink and not a stream of
+ * them; the drowsiness signal is a separate, server-side judgement over
+ * `eyeClosed` duration and is deliberately not derived from this count.
+ */
+void blinkLoop() {
+  const double period = g_cfg.blink_sample_fps > 0 ? 1.0 / g_cfg.blink_sample_fps : 0.0;
+  if (period <= 0) return;  // sampling disabled
+
+  while (!g_stop) {
+    std::this_thread::sleep_for(std::chrono::milliseconds(
+        static_cast<int>(std::max(20.0, period * 1000.0))));
+    if (!g_inMeeting) continue;
+
+    std::vector<ParticipantState*> due;
+    {
+      std::lock_guard<std::mutex> lk(g_partsMu);
+      for (auto& kv : g_parts) {
+        ParticipantState& st = *kv.second;
+        if (st.present && st.videoOn.load() && secondsSince(st.lastBlinkSample) >= period)
+          due.push_back(&st);
+      }
+    }
+
+    for (ParticipantState* st : due) {
+      I420Frame frame;
+      Clock::time_point frameAt;
+      if (!st->latestFrame(&frame, &frameAt)) continue;
+      if (secondsSince(frameAt) > g_cfg.video_stall_sec) continue;
+
+      // Lower quality than the analysis path: the eye-aspect ratio survives
+      // compression that would hurt recognition, and this runs far more often.
+      const std::string b64 = yuvjpeg::encodeI420(frame.y.data(), frame.u.data(), frame.v.data(),
+                                                  frame.width, frame.height, 55);
+      if (b64.empty()) continue;
+
+      const json r = g_analyzer->eyes(b64);
+      st->lastBlinkSample = Clock::now();
+      if (!r.value("ok", false)) continue;
+      if (r["eyeClosed"].is_null()) continue;  // no face: not evidence either way
+
+      const bool closed = r.value("eyeClosed", false);
+      if (closed && !st->blinkEyeClosed) {
+        st->blinkCount++;
+        st->blinkTimes.push_back(Clock::now());
+      }
+      st->blinkEyeClosed = closed;
+
+      const auto cutoff = Clock::now() - std::chrono::seconds(static_cast<int>(kBlinkWindowSec));
+      while (!st->blinkTimes.empty() && st->blinkTimes.front() < cutoff) st->blinkTimes.pop_front();
+      if (!st->blinkWindowReady && secondsSince(st->joinedAt) >= kBlinkWindowSec)
+        st->blinkWindowReady = true;
+    }
+  }
 }
 
 void analysisLoop() {
@@ -698,6 +777,7 @@ int main(int argc, char** argv) {
   std::signal(SIGTERM, onSignal);
 
   std::thread analysis(analysisLoop);
+  std::thread blinks(blinkLoop);
   std::thread work(g_cfg.pinned() ? pinnedLoop : assignmentLoop);
 
   if (g_cfg.pinned()) {
@@ -721,6 +801,7 @@ int main(int argc, char** argv) {
 
   g_stop = true;
   analysis.join();
+  blinks.join();
   work.join();
   unsubscribeAll();
   if (g_meeting) g_meeting->Leave(LEAVE_MEETING);

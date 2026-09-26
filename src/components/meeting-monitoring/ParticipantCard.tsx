@@ -26,6 +26,7 @@ import {
   needsAttention,
 } from "@/lib/meeting/signals";
 import { FaceOverlay } from "./FaceOverlay";
+import { ParticipantSignals } from "./ParticipantSignals";
 
 function initials(name: string): string {
   const trimmed = name.trim();
@@ -201,6 +202,8 @@ function Card({ participant: p, now, onOpen, canViewEvidence }: ParticipantCardP
           </div>
         )}
 
+        <ParticipantSignals participant={p} />
+
         <div className="flex items-center justify-between text-[0.65rem] text-slate-400">
           <span>解析 {ago(p.lastAnalyzedAt, now)}</span>
           {p.analysisConfidence != null && (
@@ -242,6 +245,10 @@ export const ParticipantCard = memo(Card, (a, b) => {
     p.traineeName === q.traineeName &&
     p.displayName === q.displayName &&
     p.headYaw === q.headYaw &&
-    p.headPitch === q.headPitch
+    p.headPitch === q.headPitch &&
+    p.headState === q.headState &&
+    p.blinkRatePerMin === q.blinkRatePerMin &&
+    p.blinkCount === q.blinkCount &&
+    p.sharpness === q.sharpness
   );
 });

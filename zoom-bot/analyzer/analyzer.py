@@ -25,6 +25,7 @@ is being sampled every few seconds.
 Protocol (one JSON object per line, same shape as the UXE server):
 
     -> {"op":"analyze", "image_b64":"...", "identify":true, "top_k":3}
+    -> {"op":"eyes",    "image_b64":"..."}   # landmarks-only, for blink sampling
     <- {"ok":true, "faceCount":2, "primary":{...}, "identity":{...}}
 
 Run:
@@ -103,6 +104,28 @@ POSE_MODEL = np.array(
 # a single closed frame is a blink, and only the backend knows the tenant's
 # threshold.
 EAR_CLOSED = 0.18
+
+# Sharpness is the variance of the Laplacian over the face crop, which is the
+# standard no-reference blur estimate. The raw variance is unbounded and scales
+# with contrast, so it is squashed to 0..1 against a reference value measured on
+# this project's own enrolment photographs. It is reported so the console can
+# say "this reading is unreliable" — a blurred frame produces confident-looking
+# pose and eye numbers that mean nothing.
+#
+# Measured on a test portrait under increasing Gaussian blur, with this
+# reference: sharp 1.00 (clipped), k=3 0.30, k=5 0.14, k=9 0.05, k=25 0.01. The
+# scale therefore saturates at the top, which is deliberate — the signal only
+# has to separate "usable" from "do not trust this reading", and the UI's
+# unreliable threshold of 0.25 falls between the k=3 and k=5 cases above.
+SHARPNESS_REFERENCE = 400.0
+
+
+def sharpness_score(gray_crop: np.ndarray) -> float:
+    """0..1 no-reference sharpness of a face crop."""
+    if gray_crop.size == 0:
+        return 0.0
+    variance = float(cv2.Laplacian(gray_crop, cv2.CV_64F).var())
+    return round(min(1.0, variance / SHARPNESS_REFERENCE), 4)
 
 
 def eye_aspect_ratio(points: np.ndarray) -> float:
@@ -262,12 +285,65 @@ class Analyzer:
             return out
 
         primary_idx, primary = self._largest(faces, width, height)
-        out["primary"] = self._describe(primary, width, height)
+        described = self._describe(primary, width, height)
+
+        # Sharpness is measured on the face only. Over the whole frame a busy
+        # background would mask a blurred face, which is precisely the case
+        # that has to be caught.
+        box = described["box"]
+        x0 = max(0, int(box["x"] * width))
+        y0 = max(0, int(box["y"] * height))
+        x1 = min(width, int((box["x"] + box["width"]) * width))
+        y1 = min(height, int((box["y"] + box["height"]) * height))
+        crop = bgr[y0:y1, x0:x1]
+        described["sharpness"] = (
+            sharpness_score(cv2.cvtColor(crop, cv2.COLOR_BGR2GRAY)) if crop.size else 0.0
+        )
+
+        out["primary"] = described
         out["primaryIndex"] = primary_idx
 
         if req.get("identify", True):
             out["identity"] = self._identify(raw, req.get("top_k", 3))
         return out
+
+    def eyes(self, req: dict) -> dict:
+        """Eye state only, for blink sampling.
+
+        A blink lasts 100-400ms, so it is invisible at the 10s cadence the full
+        `analyze` runs at: counting blinks needs ~10 samples a second. This
+        path therefore does the landmark pass and nothing else — no pose solve,
+        no identity, no sharpness — so the bot can afford to call it often.
+        Returns `eyeClosed` per frame; counting the closed->open transitions is
+        the caller's job, because only the caller knows its own sample rate.
+        """
+        raw = req.get("image_b64")
+        if not raw:
+            return {"ok": False, "error": "image_b64 required"}
+        try:
+            buf = np.frombuffer(base64.b64decode(raw), np.uint8)
+            bgr = cv2.imdecode(buf, cv2.IMREAD_COLOR)
+        except Exception as e:
+            return {"ok": False, "error": f"decode: {e}"}
+        if bgr is None:
+            return {"ok": False, "error": "decode: not an image"}
+
+        height, width = bgr.shape[:2]
+        result = self._landmarks(bgr)
+        faces = result.face_landmarks if result else []
+        if not faces:
+            # No face is not an open eye and not a closed one.
+            return {"ok": True, "faceCount": 0, "eyeClosed": None}
+
+        _, primary = self._largest(faces, width, height)
+        pts = np.array([[p.x * width, p.y * height] for p in primary], dtype=np.float32)
+        ear = (eye_aspect_ratio(pts[LEFT_EYE]) + eye_aspect_ratio(pts[RIGHT_EYE])) / 2.0
+        return {
+            "ok": True,
+            "faceCount": len(faces),
+            "eyeAspectRatio": round(ear, 4),
+            "eyeClosed": bool(ear < EAR_CLOSED),
+        }
 
     def _landmarks(self, bgr: np.ndarray):
         import mediapipe as mp
@@ -353,6 +429,8 @@ class Handler(socketserver.StreamRequestHandler):
             try:
                 if op == "analyze":
                     res = self.analyzer.analyze(req)
+                elif op == "eyes":
+                    res = self.analyzer.eyes(req)
                 elif op == "ping":
                     res = {"ok": True, "service": "zoomer-analyzer"}
                 else:

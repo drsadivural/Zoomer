@@ -33,6 +33,15 @@ export interface AnalysisObservation {
   eyeClosed?: boolean | null;
   /** 0..1 eye openness, higher is more open. Null if not measurable. */
   eyeOpenness?: number | null;
+  /** Blinks per minute over the capture side's own rolling window. Only the
+   *  capture side runs fast enough to see a 100-400ms blink, so this is
+   *  reported, never derived here. Null means not measured. */
+  blinkRatePerMin?: number | null;
+  /** Blinks counted since the participant joined, monotonic. */
+  blinkCount?: number | null;
+  /** 0..1 sharpness of the face crop. Low means the *analysis* is unreliable,
+   *  which is not the same as a poor engagement signal. */
+  sharpness?: number | null;
   identityStatus?: IdentityStatus | null;
   identityConfidence?: number | null;
   identityTraineeId?: string | null;
@@ -77,6 +86,9 @@ export interface ParticipantState {
   eyeOpenness: number | null;
   /** Start of the current unbroken run of closed eyes; null when open. */
   eyesClosedSince: number | null;
+  blinkRatePerMin: number | null;
+  blinkCount: number;
+  sharpness: number | null;
 
   screenFacingProbability: number | null;
   gazeHorizontal: number | null;
@@ -125,6 +137,9 @@ export function emptyParticipantState(
     headState: "UNKNOWN",
     eyeClosed: false,
     eyeOpenness: null,
+    blinkRatePerMin: null,
+    blinkCount: 0,
+    sharpness: null,
     eyesClosedSince: null,
     screenFacingProbability: null,
     gazeHorizontal: null,
@@ -312,6 +327,11 @@ export function reduceParticipantState(
 
     eyeClosed,
     eyeOpenness: observation.eyeOpenness ?? previous.eyeOpenness,
+    blinkRatePerMin: observation.blinkRatePerMin ?? previous.blinkRatePerMin,
+    // Monotonic: a provider that restarts and resends a lower cumulative count
+    // must not make the meeting's blink total go backwards.
+    blinkCount: Math.max(previous.blinkCount, observation.blinkCount ?? 0),
+    sharpness: observation.sharpness ?? previous.sharpness,
     eyesClosedSince,
 
     screenFacingProbability: facing?.screenFacingProbability ?? previous.screenFacingProbability,

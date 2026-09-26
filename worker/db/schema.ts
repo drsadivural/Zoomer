@@ -594,6 +594,14 @@ export const participantAnalysisState = sqliteTable(
     eyeOpenness: real("eye_openness"),
     /** When the current unbroken run of closed eyes began. */
     eyesClosedSince: integer("eyes_closed_since"),
+    /** Blinks per minute, as measured by the capture side at its own frame
+     *  rate. Null means not measured — observations are far too sparse to
+     *  derive this here without inventing a number. */
+    blinkRatePerMin: real("blink_rate_per_min"),
+    blinkCount: integer("blink_count").notNull().default(0),
+    /** 0..1 image sharpness of the face crop; low values mean the analysis
+     *  itself is unreliable, which is different from a bad engagement signal. */
+    sharpness: real("sharpness"),
 
     screenFacingProbability: real("screen_facing_probability"),
     gazeHorizontal: real("gaze_horizontal"),
@@ -648,6 +656,8 @@ export const participantObservations = sqliteTable(
 
     eyeClosed: integer("eye_closed", { mode: "boolean" }),
     eyeOpenness: real("eye_openness"),
+    blinkRatePerMin: real("blink_rate_per_min"),
+    sharpness: real("sharpness"),
 
     cameraOn: integer("camera_on", { mode: "boolean" }),
     microphoneOn: integer("microphone_on", { mode: "boolean" }),

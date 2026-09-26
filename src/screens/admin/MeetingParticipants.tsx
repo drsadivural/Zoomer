@@ -11,7 +11,6 @@ import { Download, RefreshCcw } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { AppCard, CardHead, EmptyState, ErrorNotice, LoadingRows, StatusBadge } from "@/components/shell/primitives";
-import { ZoomReadiness } from "@/components/meeting-monitoring/ZoomReadiness";
 import { ParticipantDetail } from "@/components/meeting-monitoring/ParticipantDetail";
 import {
   FilterBar,
@@ -120,17 +119,14 @@ export function MeetingParticipantsScreen() {
         {loading && !participants.length ? (
           <LoadingRows rows={6} />
         ) : !rows.length ? (
-          <>
-            <EmptyState
-              title="参加者がいません"
-              description={
-                participants.length
-                  ? "フィルターを変更してください。"
-                  : "Zoomの参加者は会議の開始時に自動で取り込まれます。取り込まれない場合は下の確認結果をご覧ください。"
-              }
-            />
-            {!participants.length && <ZoomReadiness />}
-          </>
+          <EmptyState
+            title="参加者がいません"
+            description={
+              participants.length
+                ? "フィルターを変更してください。"
+                : "Zoomの参加者は会議の開始時に自動で取り込まれます。取り込まれない場合は設定のZoom連携をご確認ください。"
+            }
+          />
         ) : (
           <div className="overflow-x-auto border-t border-slate-100">
             <Table>

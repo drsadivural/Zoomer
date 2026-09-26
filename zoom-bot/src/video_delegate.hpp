@@ -15,6 +15,7 @@
 #include <atomic>
 #include <chrono>
 #include <cstdint>
+#include <deque>
 #include <mutex>
 #include <string>
 
@@ -39,6 +40,10 @@ struct ParticipantState {
   I420Frame frame;
   Clock::time_point frameAt{};
 
+  /** When this participant was first seen, so the blink window can be told
+   *  apart from "not sampled long enough yet". */
+  Clock::time_point joinedAt{Clock::now()};
+
   /** Analysis bookkeeping, touched only by the analysis thread. */
   Clock::time_point lastObserved{};
   Clock::time_point lastIdentified{};
@@ -48,6 +53,24 @@ struct ParticipantState {
   std::string traineeId;
   double identityConfidence = 0.0;
   bool reportedLeft = false;
+
+  /** Blink bookkeeping, touched only by the blink sampler thread.
+   *
+   *  Counted here rather than server-side because a blink lasts 100-400ms and
+   *  observations are sent every few seconds: by the time an observation is
+   *  built the blink is long over. The sampler runs a landmarks-only pass
+   *  (`op: "eyes"`) fast enough to see one, and reports a rate.
+   *
+   *  `blinkTimes` keeps the instants of recent blinks so the rate is over a
+   *  real trailing window rather than since-join, which would flatten out and
+   *  stop responding after a few minutes. */
+  std::deque<Clock::time_point> blinkTimes;
+  uint64_t blinkCount = 0;
+  bool blinkEyeClosed = false;
+  Clock::time_point lastBlinkSample{};
+  /** False until the sampler has a full window, so a rate is never reported
+   *  from two seconds of data. */
+  bool blinkWindowReady = false;
 
   ParticipantState(uint32_t id, std::string n) : userId(id), name(std::move(n)) {}
 

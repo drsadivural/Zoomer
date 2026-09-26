@@ -16,7 +16,6 @@ import { MeetingKPIs, MeetingStatusStrip } from "@/components/meeting-monitoring
 import { ParticipantGrid } from "@/components/meeting-monitoring/ParticipantGrid";
 import { ParticipantDetail } from "@/components/meeting-monitoring/ParticipantDetail";
 import { EventFeed } from "@/components/meeting-monitoring/EventFeed";
-import { ZoomReadiness } from "@/components/meeting-monitoring/ZoomReadiness";
 import {
   FilterBar,
   matchesFilter,
@@ -210,19 +209,15 @@ export function LiveMeetingScreen() {
         <AppCard>
           <EmptyState
             title="監視できる会議がありません"
-            description="Zoomで会議を開始すると自動で表示されます。表示されない場合は下の確認結果をご覧ください。"
+            description="Zoomで会議を開始すると自動で表示されます。表示されない場合は設定のZoom連携をご確認ください。"
           />
-          <ZoomReadiness />
         </AppCard>
       ) : !analysis ? (
         <AppCard>
           {loading ? (
             <LoadingRows rows={5} />
           ) : (
-            <>
-              <EmptyState title="データがありません" />
-              <ZoomReadiness />
-            </>
+            <EmptyState title="データがありません" />
           )}
         </AppCard>
       ) : (
@@ -235,9 +230,8 @@ export function LiveMeetingScreen() {
             <AppCard>
               <EmptyState
                 title="参加者がいません"
-                description="Zoomの参加者は会議の開始時に自動で取り込まれます。取り込まれない場合は下の確認結果をご覧ください。"
+                description="Zoomの参加者は会議の開始時に自動で取り込まれます。取り込まれない場合は設定のZoom連携をご確認ください。"
               />
-              <ZoomReadiness />
             </AppCard>
           )}
 

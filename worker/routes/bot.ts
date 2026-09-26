@@ -351,6 +351,14 @@ export const observationSchema = z.object({
    *  different from "eyes open" and is treated as such downstream. */
   eyeClosed: z.boolean().nullable().optional(),
   eyeOpenness: z.number().min(0).max(1).nullable().optional(),
+  /** Blinks per minute measured by the bot at its own capture rate. A blink
+   *  lasts 100-400ms, so only the capture side can see one; the backend never
+   *  derives this from its 2-10s observation cadence. Capped well above any
+   *  physiological rate so a broken counter is rejected, not stored. */
+  blinkRatePerMin: z.number().min(0).max(200).nullable().optional(),
+  blinkCount: z.number().int().min(0).nullable().optional(),
+  /** 0..1 sharpness of the face crop. */
+  sharpness: z.number().min(0).max(1).nullable().optional(),
 
   identityStatus: z
     .enum(["VERIFIED", "UNVERIFIED", "MISMATCH", "NO_FACE", "MULTIPLE_FACES", "LOW_CONFIDENCE", "UNKNOWN"])
@@ -453,6 +461,9 @@ app.post("/observe", async (c) => {
         gazeVertical: o.gazeVertical ?? null,
         eyeClosed: o.eyeClosed ?? null,
         eyeOpenness: o.eyeOpenness ?? null,
+        blinkRatePerMin: o.blinkRatePerMin ?? null,
+        blinkCount: o.blinkCount ?? null,
+        sharpness: o.sharpness ?? null,
         identityStatus: o.identityStatus ?? null,
         identityConfidence: o.identityConfidence ?? null,
         identityTraineeId: o.traineeId ?? null,
