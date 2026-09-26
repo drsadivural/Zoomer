@@ -101,6 +101,8 @@ export const api = {
   deleteTrainee: (id: string) => request<{ ok: boolean }>(`/trainees/${id}`, { method: "DELETE" }),
   importTrainees: (csv: string) =>
     request<ImportResult>("/trainees/import", { method: "POST", body: { csv } }),
+  zoomDiagnostics: () =>
+    request<ZoomDiagnostics>("/integrations/zoom/diagnostics"),
   traineeThumbnails: (traineeIds: string[]) =>
     request<{ thumbnails: Record<string, string>; enabled: boolean }>("/trainees/thumbnails", {
       method: "POST",
@@ -326,6 +328,17 @@ export interface QualityMetricsPayload {
   brightness: number;
   sharpness: number;
   occlusion: number;
+}
+
+/** Why the organizer console has nothing to show. See ZoomReadiness. */
+export interface ZoomDiagnostics {
+  connected: boolean;
+  connectedAt: number | null;
+  accountId: string | null;
+  scopes: { required: string[]; missing: string[]; grantedCount: number };
+  liveMeetings: { ok: boolean; count?: number; error?: string };
+  webhooks: { received: number; lastAt: number | null; url: string };
+  sessions: { total: number; live: number; linkedToZoom: number };
 }
 
 export interface EnrollRequest {

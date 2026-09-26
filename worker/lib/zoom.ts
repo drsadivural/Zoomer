@@ -24,6 +24,25 @@ export const ZOOM_SCOPES = [
   "user:read:user",
 ] as const;
 
+/**
+ * Canonical form of a Zoom meeting id: digits only.
+ *
+ * Zoom shows a meeting id as "801 755 4335" and people paste it that way, but
+ * every webhook payload and API response carries "8017554335". Storing what
+ * was typed meant the two never compared equal, so a session linked by hand
+ * received no participants and the webhook quietly created a second, empty
+ * session beside it. Normalising on the way in and on every lookup is what
+ * makes a pasted id work.
+ *
+ * Returns null for anything with no digits, so an empty field stays unlinked
+ * rather than becoming the empty string.
+ */
+export function normalizeMeetingId(value: string | null | undefined): string | null {
+  if (!value) return null;
+  const digits = value.replace(/\D+/g, "");
+  return digits.length ? digits : null;
+}
+
 export interface ZoomTokens {
   accessToken: string;
   refreshToken: string;

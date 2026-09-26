@@ -3,11 +3,13 @@
  * roster reconciliation. The webhook receiver lives in `zoom-webhook.ts`
  * because it must stay outside the authenticated router.
  */
-import { and, eq, isNull } from "drizzle-orm";
+import { and, eq, isNull, sql } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/d1";
 import { Hono } from "hono";
 import { z } from "zod";
-import { integrations, sessionParticipants, trainingSessions, zoomMeetings } from "../db/schema";
+import {
+  integrations, sessionParticipants, trainingSessions, webhookDeliveries, zoomMeetings,
+} from "../db/schema";
 import { recordAudit } from "../lib/audit";
 import { getActor, requireAuth, requirePermission } from "../lib/auth";
 import { hmacSha256Base64, timingSafeEqual } from "../lib/crypto";
@@ -266,6 +268,116 @@ app.get("/meetings", requireAuth, requirePermission("session:read"), async (c) =
   }
 
   return c.json({ meetings });
+});
+
+/* ------------------------------------------------------- diagnostics */
+
+/**
+ * Why the organizer console is empty.
+ *
+ * Getting a live meeting onto ライブ監視 depends on a chain — OAuth connected,
+ * the right scopes granted, webhooks configured and arriving, a session linked
+ * to the meeting, analysis running. Any one link missing produces the same
+ * symptom: an empty screen with nothing to act on. This reports the state of
+ * each link so the answer is on the page instead of in a database.
+ *
+ * Read-only, and it names no participant: it is a configuration check.
+ */
+app.get("/diagnostics", requireAuth, requirePermission("settings:read"), async (c) => {
+  const actor = getActor(c);
+  const db = drizzle(c.env.DB);
+
+  const rows = await db
+    .select({
+      status: integrations.status,
+      scope: integrations.scope,
+      accountId: integrations.accountId,
+      connectedAt: integrations.connectedAt,
+    })
+    .from(integrations)
+    .where(
+      and(
+        eq(integrations.organizationId, actor.organizationId),
+        eq(integrations.provider, "zoom"),
+      ),
+    )
+    .limit(1);
+  const integration = rows[0] ?? null;
+
+  const granted = new Set((integration?.scope ?? "").split(/\s+/).filter(Boolean));
+  const missingScopes = ZOOM_SCOPES.filter((s) => !granted.has(s));
+
+  // Has Zoom ever delivered anything? Zero is the signal that the event
+  // subscription was never configured or never validated — which is invisible
+  // from inside the app otherwise.
+  const deliveries = await db
+    .select({
+      total: sql<number>`count(*)`,
+      // Column references go through Drizzle rather than being written out,
+      // so a rename cannot leave a silently failing diagnostic behind.
+      lastAt: sql<number | null>`max(${webhookDeliveries.receivedAt})`,
+    })
+    .from(webhookDeliveries)
+    .where(eq(webhookDeliveries.provider, "zoom"));
+
+  const sessions = await db
+    .select({
+      total: sql<number>`count(*)`,
+      live: sql<number>`sum(case when ${trainingSessions.status} = 'LIVE' then 1 else 0 end)`,
+      linked: sql<number>`sum(case when ${trainingSessions.zoomMeetingId} is not null then 1 else 0 end)`,
+    })
+    .from(trainingSessions)
+    .where(
+      and(
+        eq(trainingSessions.organizationId, actor.organizationId),
+        isNull(trainingSessions.deletedAt),
+      ),
+    );
+
+  // Ask Zoom directly. This is the check that catches a missing scope even
+  // when the scope list looks plausible, because Zoom answers with the exact
+  // scope it wanted.
+  let liveMeetings: { ok: boolean; count?: number; error?: string } = {
+    ok: false,
+    error: "Zoom未接続",
+  };
+  if (integration?.status === "CONNECTED") {
+    try {
+      const token = await getAccessToken(
+        c.env.DB,
+        actor.organizationId,
+        c.env.ZOOM_CLIENT_ID!,
+        c.env.ZOOM_CLIENT_SECRET!,
+        c.env.DATA_ENCRYPTION_KEY!,
+      );
+      liveMeetings = { ok: true, count: (await listMeetings(token, "me", "live")).length };
+    } catch (err) {
+      liveMeetings = { ok: false, error: err instanceof Error ? err.message : "不明なエラー" };
+    }
+  }
+
+  return c.json({
+    connected: integration?.status === "CONNECTED",
+    connectedAt: integration?.connectedAt ?? null,
+    // Null means /users/me was refused, which is itself a missing-scope signal.
+    accountId: integration?.accountId ?? null,
+    scopes: {
+      required: ZOOM_SCOPES,
+      missing: missingScopes,
+      grantedCount: granted.size,
+    },
+    liveMeetings,
+    webhooks: {
+      received: Number(deliveries[0]?.total ?? 0),
+      lastAt: deliveries[0]?.lastAt ?? null,
+      url: `${c.env.PUBLIC_BASE_URL}/api/v1/webhooks/zoom`,
+    },
+    sessions: {
+      total: Number(sessions[0]?.total ?? 0),
+      live: Number(sessions[0]?.live ?? 0),
+      linkedToZoom: Number(sessions[0]?.linked ?? 0),
+    },
+  });
 });
 
 /* ---------------------------------------------------- create meeting */

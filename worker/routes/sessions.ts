@@ -18,6 +18,7 @@ import { buildJoinUrl, signJoinToken } from "../lib/join";
 import { parseBody } from "../lib/http";
 import { newId } from "../lib/ids";
 import { getRules, ruleVersionTag } from "../lib/settings";
+import { normalizeMeetingId } from "../lib/zoom";
 import type { Env, Variables } from "../types";
 import { publishToSession } from "../lib/realtime";
 
@@ -100,7 +101,9 @@ app.post("/", requirePermission("session:write"), async (c) => {
     description: body.description ?? null,
     startsAt: body.startsAt,
     endsAt: body.endsAt,
-    zoomMeetingId: body.zoomMeetingId ?? null,
+    // Digits only: Zoom displays "801 755 4335" but every webhook and API
+    // response says "8017554335", and an id stored as typed matches neither.
+    zoomMeetingId: normalizeMeetingId(body.zoomMeetingId),
     createdBy: actor.userId,
   });
 
@@ -173,6 +176,7 @@ app.patch("/:id", requirePermission("session:write"), async (c) => {
   for (const key of ["title", "description", "startsAt", "endsAt", "zoomMeetingId", "status"] as const) {
     if (body[key] !== undefined) patch[key] = body[key];
   }
+  if (body.zoomMeetingId !== undefined) patch.zoomMeetingId = normalizeMeetingId(body.zoomMeetingId);
 
   // Freeze the rules in force at go-live so later settings edits cannot
   // retroactively re-grade this session's events.
