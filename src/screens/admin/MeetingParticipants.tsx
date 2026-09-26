@@ -7,7 +7,7 @@
  */
 import { useMemo, useState } from "react";
 import { useSearchParams } from "react-router-dom";
-import { Download, RefreshCcw } from "lucide-react";
+import { Download, RefreshCcw, Users } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { AppCard, CardHead, EmptyState, ErrorNotice, LoadingRows, StatusBadge } from "@/components/shell/primitives";
@@ -20,7 +20,7 @@ import {
   type ParticipantFilter,
   type ParticipantSort,
 } from "@/components/meeting-monitoring/FilterBar";
-import { api } from "@/lib/api";
+import { api, ApiClientError } from "@/lib/api";
 import { useMeeting, useSessionPicker } from "@/lib/meeting/use-meeting";
 import {
   ENGAGEMENT_LABELS,
@@ -44,6 +44,42 @@ export function MeetingParticipantsScreen() {
     setParams({ session: id }, { replace: true }),
   );
   const { participants, loading, error, refresh, serverTime } = useMeeting({ sessionId, pollMs: 15_000 });
+
+  /**
+   * Manual roster pull.
+   *
+   * Zoom webhooks are at-least-once and can be missed entirely — if the Event
+   * Subscription was misconfigured, every participant_joined for a meeting is
+   * simply gone, and nothing in the roster will ever show them. This is the
+   * catch-up path.
+   *
+   * It reads Zoom's *past* participants endpoint, the only roster API
+   * available below a Business plan, so it is accurate once a meeting has
+   * ended and may return nothing while one is still running. Zoom's own error
+   * is surfaced verbatim rather than flattened into "同期に失敗しました",
+   * because "scope missing" and "meeting not finished" need different fixes.
+   */
+  const [syncing, setSyncing] = useState(false);
+  const [syncNote, setSyncNote] = useState<string | null>(null);
+
+  async function syncRoster() {
+    if (!sessionId) return;
+    setSyncing(true);
+    setSyncNote(null);
+    try {
+      const r = await api.zoomSyncParticipants(sessionId);
+      setSyncNote(
+        r.total === 0
+          ? "Zoomから参加者を取得できませんでした。開催中の会議では終了後に取得できます。"
+          : `Zoomから${r.total}名を取り込みました（受講者と照合 ${r.matched}名・未照合 ${r.unmatched}名）。`,
+      );
+      refresh();
+    } catch (e) {
+      setSyncNote(e instanceof ApiClientError ? e.message : "同期に失敗しました");
+    } finally {
+      setSyncing(false);
+    }
+  }
 
   const [filter, setFilter] = useState<ParticipantFilter>("all");
   const [sort, setSort] = useState<ParticipantSort>("risk");
@@ -90,6 +126,19 @@ export function MeetingParticipantsScreen() {
             <RefreshCcw className="size-3.5" />
             更新
           </Button>
+          {sessionId && can("session:write") && (
+            <Button
+              variant="outline"
+              size="sm"
+              className="gap-1.5"
+              onClick={() => void syncRoster()}
+              disabled={syncing}
+              title="Zoomから参加者一覧を取り込みます（会議終了後に取得できます）"
+            >
+              <Users className="size-3.5" />
+              {syncing ? "同期中…" : "Zoomから参加者を同期"}
+            </Button>
+          )}
           {sessionId && can("report:create") && (
             <Button asChild variant="outline" size="sm" className="gap-1.5">
               <a href={api.meetingReportCsvUrl(sessionId)}>
@@ -100,6 +149,15 @@ export function MeetingParticipantsScreen() {
           )}
         </div>
       </div>
+
+      {syncNote && (
+        <div role="status" className="rounded-xl border border-cyan-200 bg-cyan-50 px-4 py-2.5 text-sm text-cyan-800">
+          {syncNote}
+          <button type="button" className="ml-3 font-bold underline" onClick={() => setSyncNote(null)}>
+            閉じる
+          </button>
+        </div>
+      )}
 
       {error && <ErrorNotice message={error} onRetry={refresh} />}
 
