@@ -50,6 +50,17 @@ struct Config {
   int frame_max_edge = 640;
   /** Give up on a participant's video after this long with no frame. */
   int video_stall_sec = 15;
+  /** Eye-state samples per second, per participant with video on.
+   *
+   *  A blink lasts 100-400ms, so a rate needs several samples a second; at 5Hz
+   *  a 250ms blink is caught about once and the closing edge is seen.
+   *
+   *  This is not cheap. The landmarks-only pass was measured at 36ms per
+   *  sample on this host, so 5Hz costs roughly 18% of a core *per participant*
+   *  — a ten-person meeting is about two cores. It is the first knob to turn
+   *  down on a large meeting, and 0 disables blink measurement entirely, in
+   *  which case the console shows 未測定 rather than a fabricated zero. */
+  double blink_sample_fps = 5.0;
 
   static std::string env(const char* k, const std::string& def = "") {
     const char* v = std::getenv(k);
@@ -58,6 +69,16 @@ struct Config {
   static int envi(const char* k, int def) {
     const char* v = std::getenv(k);
     return v && *v ? std::atoi(v) : def;
+  }
+
+  static double envd(const char* k, double def) {
+    const char* v = std::getenv(k);
+    if (!v || !*v) return def;
+    char* end = nullptr;
+    const double parsed = std::strtod(v, &end);
+    // Reject junk rather than silently taking strtod's 0, which would disable
+    // blink sampling on a typo and look like the feature is unsupported.
+    return end && end != v ? parsed : def;
   }
 
   static Config fromEnv() {
@@ -80,6 +101,7 @@ struct Config {
     c.jpeg_quality = envi("JPEG_QUALITY", c.jpeg_quality);
     c.frame_max_edge = envi("FRAME_MAX_EDGE", c.frame_max_edge);
     c.video_stall_sec = envi("VIDEO_STALL_SEC", c.video_stall_sec);
+    c.blink_sample_fps = envd("BLINK_SAMPLE_FPS", c.blink_sample_fps);
     return c;
   }
 

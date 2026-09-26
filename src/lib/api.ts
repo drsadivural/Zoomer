@@ -747,6 +747,10 @@ export interface MeetingParticipant {
   eyeClosed: boolean;
   eyeOpenness: number | null;
   eyesClosedSince: number | null;
+  /** Null means the capture side did not measure it, not "zero blinks". */
+  blinkRatePerMin: number | null;
+  blinkCount: number;
+  sharpness: number | null;
   screenFacingProbability: number | null;
   currentState: string;
   currentStateSince: number;

@@ -32,6 +32,11 @@ class AnalyzerClient {
     return call({{"op", "analyze"}, {"image_b64", jpegB64}, {"identify", identify}});
   }
 
+  /** Landmarks-only eye state, cheap enough to call several times a second. */
+  nlohmann::json eyes(const std::string& jpegB64) {
+    return call({{"op", "eyes"}, {"image_b64", jpegB64}});
+  }
+
   bool ping() { return call({{"op", "ping"}}).value("ok", false); }
 
  private:
